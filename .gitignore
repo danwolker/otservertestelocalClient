@@ -2,7 +2,7 @@
 *.log
 otclientv8.log
 
-# Tibia assets / local things
+# Things / Tibia assets
 data/things/
 *.dat
 *.spr
@@ -14,13 +14,13 @@ dist/
 Release/
 Debug/
 
-# Compilados
+# Executáveis e libs
 *.exe
 *.dll
-*.obj
 *.lib
 *.pdb
 *.ilk
+*.obj
 
 # Editor
 .vscode/
