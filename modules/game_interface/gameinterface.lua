@@ -127,6 +127,10 @@ end
 function onGameEnd()
   hide()
   modules.client_topmenu.getTopMenu():setImageColor('white')
+
+  if modules.client_options.getOption('autoExit') then
+    exit()
+  end
 end
 
 function show()

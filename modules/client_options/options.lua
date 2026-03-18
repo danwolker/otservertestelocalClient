@@ -66,7 +66,8 @@ local defaultOptions = {
 
   profile = 1,
   
-  antialiasing = true
+  antialiasing = true,
+  autoExit = false
 }
 
 local optionsWindow

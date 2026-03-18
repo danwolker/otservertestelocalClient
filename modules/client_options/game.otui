@@ -27,6 +27,11 @@ OptionPanel
     !tooltip: tr('Allows to execute next move without server confirmation of previous one')
 
   OptionCheckBox
+    id: autoExit
+    !text: tr('Auto exit on disconnect')
+    !tooltip: tr('Close the client when connection is lost')
+
+  OptionCheckBox
     id: smartWalk
     !text: tr('Enable smart walking')
     !tooltip: tr('Will detect when to use diagonal step based on the\nkeys you are pressing')
