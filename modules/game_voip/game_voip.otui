@@ -1,0 +1,55 @@
+VoipMember < Panel
+  height: 25
+  margin-top: 2
+  background-color: #ffffff11
+
+  Label
+    id: name
+    anchors.left: parent.left
+    anchors.top: parent.top
+    margin-left: 5
+    width: 100
+    !text: tr('Unknown')
+
+  Label
+    id: vocation
+    anchors.right: parent.right
+    anchors.top: parent.top
+    margin-right: 5
+    width: 80
+    text-align: right
+    color: #bbbbbb
+    !text: tr('None')
+
+MiniWindow
+  id: voipWindow
+  !text: tr('Party VoIP')
+  height: 150
+  icon: /images/topbuttons/audio
+  @onClose: modules.game_voip.onMiniWindowClose()
+  &save: true
+  &autoOpen: false
+
+  MiniWindowContents
+    layout: verticalBox
+    padding-left: 5
+    padding-right: 5
+
+    Label
+      id: descriptionLabel
+      !text: tr('No active call.')
+      text-auto-resize: true
+      margin-top: 5
+      color: #aaaaaa
+
+    VerticalSeparator
+      margin-top: 5
+
+    Panel
+      id: voipMemberList
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      layout: verticalBox
+      fit-children: true
+      margin-top: 5

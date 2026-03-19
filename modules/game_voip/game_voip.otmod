@@ -1,0 +1,9 @@
+Module
+  name: game_voip
+  description: Party VoIP in-game module
+  author: Antigravity
+  website: https://github.com/edubart/otclient
+  sandboxed: true
+  scripts: [ game_voip ]
+  @onLoad: init()
+  @onUnload: terminate()
