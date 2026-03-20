@@ -15,6 +15,9 @@ function ProtocolGame:onOpcode(opcode, msg)
 end
 
 function ProtocolGame:onExtendedOpcode(opcode, buffer)
+  if opcode ~= 0 then -- Ignora o ping/opcode 0 se houver
+    print(">> [Extended Opcode] Chegou Opcode: " .. opcode .. " | Tamanho buffer: " .. (buffer and #buffer or 0))
+  end
   local callback = extendedCallbacks[opcode]
   if callback then
     callback(self, opcode, buffer)

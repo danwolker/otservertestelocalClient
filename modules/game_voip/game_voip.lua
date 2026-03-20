@@ -1,6 +1,8 @@
 voipWindow = nil
 voipButton = nil
-refreshEvent = nil
+voipUpdateEvent = nil
+
+local OPCODE_VOIP = 200
 
 local VOCATION_NAMES = {
   [0] = "None",
@@ -14,9 +16,31 @@ local VOCATION_NAMES = {
   [8] = "Elite Knight",
 }
 
+-- Maps vocation id ranges to mute button ids
+local VOCATION_MUTE_ID = {
+  [0] = "All",
+  [1] = "Sorcerer", [5] = "Sorcerer",
+  [2] = "Druid",    [6] = "Druid",
+  [3] = "Paladin",  [7] = "Paladin",
+  [4] = "Knight",   [8] = "Knight",
+  [9] = "Monk",
+}
+
+-- member data stored by name, populated from server opcode
+local partyData = {}  -- {name -> {vocation, outfit, isLeader}}
+local mutedVocations = {}
+
+local function split(text, sep)
+  local res = {}
+  for str in string.gmatch(text, "([^"..sep.."]+)") do
+    table.insert(res, str)
+  end
+  return res
+end
+
 function init()
   voipButton = modules.client_topmenu.addRightGameToggleButton(
-    'voipButton', tr('Party VoIP'), '/images/topbuttons/audio', toggle
+    'voipButton', tr('Party VoIP'), '/data/images/topbuttons/audio', toggle
   )
   voipButton:setOn(false)
 
@@ -24,20 +48,16 @@ function init()
   voipWindow:setup()
   voipWindow:close()
 
-  -- Ouve mudanças de Shield (junta/sai de party) em qualquer criatura
-  connect(Creature, { onShieldChange = onShieldChange })
-  connect(g_game,   { onGameEnd = clearMembers })
+  ProtocolGame.registerExtendedOpcode(OPCODE_VOIP, onVoipUpdate)
+  connect(g_game, { onGameEnd = clearMembers })
 end
 
 function terminate()
-  disconnect(Creature, { onShieldChange = onShieldChange })
-  disconnect(g_game,   { onGameEnd = clearMembers })
-  if refreshEvent then
-    removeEvent(refreshEvent)
-    refreshEvent = nil
-  end
-  voipButton:destroy()
-  voipWindow:destroy()
+  removeEvent(voipUpdateEvent)
+  ProtocolGame.unregisterExtendedOpcode(OPCODE_VOIP)
+  disconnect(g_game, { onGameEnd = clearMembers })
+  if voipButton then voipButton:destroy() end
+  if voipWindow then voipWindow:destroy() end
 end
 
 function toggle()
@@ -47,7 +67,6 @@ function toggle()
   else
     voipWindow:open()
     voipButton:setOn(true)
-    refreshPartyList()
   end
 end
 
@@ -55,21 +74,93 @@ function onMiniWindowClose()
   voipButton:setOn(false)
 end
 
--- Chamado quando qualquer criatura tem o escudo alterado (event de party)
-function onShieldChange(creature, shield, blink)
-  -- Debounce: espera 300ms antes de atualizar para evitar múltiplos refreshes
-  if refreshEvent then
-    removeEvent(refreshEvent)
+-- Called every 500ms to update HP/mana bars from local creature objects
+function updateBars()
+  removeEvent(voipUpdateEvent)
+  voipUpdateEvent = scheduleEvent(updateBars, 500)
+
+  if not voipWindow or not g_game.isOnline() then return end
+  local memberList = voipWindow:recursiveGetChildById('voipMemberList')
+  if not memberList then return end
+
+  for name, data in pairs(partyData) do
+    local widget = memberList:getChildById(name)
+    if widget then
+      -- Try to find the creature in the local game state
+      local creature = g_map.getCreatureByName(name)
+      if creature then
+        local hp = creature:getHealthPercent()
+        widget:getChildById('healthBar'):setValue(hp, 0, 100)
+        -- UICreature auto-renders the outfit, just ensure it's set once
+      end
+    end
   end
-  refreshEvent = scheduleEvent(refreshPartyList, 300)
+end
+
+function onVoipUpdate(protocol, opcode, buffer)
+  if opcode ~= OPCODE_VOIP then return end
+
+  if buffer == "" then
+    clearMembers()
+    return
+  end
+
+  local label = voipWindow:recursiveGetChildById('descriptionLabel')
+  if label then label:hide() end
+
+  local membersData = split(buffer, "|")
+  local currentMembers = {}
+  local memberList = voipWindow:recursiveGetChildById('voipMemberList')
+
+  for i, memberData in ipairs(membersData) do
+    -- Format: Name;VocID;lookType,head,body,legs,feet,addons;health%;mana%
+    local parts = split(memberData, ";")
+    if #parts >= 4 then
+      local name = parts[1]
+      local vocID = tonumber(parts[2]) or 0
+      local outfitparts = split(parts[3], ",")
+      local hpPercent = tonumber(parts[4]) or 0
+      local mpPercent = tonumber(parts[5]) or 0
+      local isLeader = (i == 1)
+
+      local vocName = VOCATION_NAMES[vocID] or "None"
+      local outfit = {
+        type   = tonumber(outfitparts[1]) or 0,
+        head   = tonumber(outfitparts[2]) or 0,
+        body   = tonumber(outfitparts[3]) or 0,
+        legs   = tonumber(outfitparts[4]) or 0,
+        feet   = tonumber(outfitparts[5]) or 0,
+        addons = tonumber(outfitparts[6]) or 0,
+      }
+
+      partyData[name] = { vocID = vocID, outfit = outfit, isLeader = isLeader }
+      addMember(name, vocName, isLeader, outfit, hpPercent, mpPercent)
+      currentMembers[name] = true
+    end
+  end
+
+  -- Remove members that left
+  for _, child in ipairs(memberList:getChildren()) do
+    local childName = child:getId()
+    if not currentMembers[childName] then
+      partyData[childName] = nil
+      child:destroy()
+    end
+  end
+
+  -- Start the live update loop if not already running
+  if not voipUpdateEvent then
+    voipUpdateEvent = scheduleEvent(updateBars, 500)
+  end
 end
 
 function clearMembers()
+  partyData = {}
+  removeEvent(voipUpdateEvent)
+  voipUpdateEvent = nil
   if not voipWindow then return end
   local memberList = voipWindow:recursiveGetChildById('voipMemberList')
-  if memberList then
-    memberList:destroyChildren()
-  end
+  if memberList then memberList:destroyChildren() end
   local label = voipWindow:recursiveGetChildById('descriptionLabel')
   if label then
     label:setText(tr('No active call.'))
@@ -77,72 +168,48 @@ function clearMembers()
   end
 end
 
-function refreshPartyList()
-  refreshEvent = nil
-  if not voipWindow then return end
-
-  clearMembers()
-
-  local localPlayer = g_game.getLocalPlayer()
-  if not localPlayer then return end
-
-  -- Verifica se o jogador local está em uma party
-  if not localPlayer:isPartyMember() then return end
-
-  local creatures = g_map.getSpectators(localPlayer:getPosition(), false)
-  local leader = nil
-  local members = {}
-
-  for _, creature in ipairs(creatures) do
-    if creature:isPlayer() then
-      if creature:isPartyLeader() then
-        leader = creature
-      elseif creature:isPartyMember() then
-        table.insert(members, creature)
-      end
-    end
-  end
-
-  -- Se o jogador local é o líder
-  if localPlayer:isPartyLeader() then
-    leader = localPlayer
-  end
-
-  -- Nenhum membro de party visível ainda
-  if not leader and #members == 0 then return end
-
-  -- Esconde o label "No active call"
-  local label = voipWindow:recursiveGetChildById('descriptionLabel')
-  if label then label:hide() end
-
-  -- Adiciona líder primeiro
-  if leader then
-    local vocName = VOCATION_NAMES[leader:getVocation()] or "Unknown"
-    addMember("👑 " .. leader:getName(), vocName, true)
-  end
-
-  -- Adiciona o próprio player local se for apenas membro (não líder)
-  if localPlayer:isPartyMember() and not localPlayer:isPartyLeader() then
-    local vocName = VOCATION_NAMES[localPlayer:getVocation()] or "Unknown"
-    addMember(localPlayer:getName(), vocName, false)
-  end
-
-  -- Adiciona os outros membros visíveis
-  for _, member in ipairs(members) do
-    if member:getId() ~= localPlayer:getId() then
-      local vocName = VOCATION_NAMES[member:getVocation()] or "Unknown"
-      addMember(member:getName(), vocName, false)
-    end
-  end
-end
-
-function addMember(name, vocation, isLeader)
+function addMember(name, vocation, isLeader, outfit, healthPercent, manaPercent)
   local memberList = voipWindow:recursiveGetChildById('voipMemberList')
   if not memberList then return end
-  local widget = g_ui.createWidget('VoipMember', memberList)
-  widget:getChildById('name'):setText(name)
+
+  local widget = memberList:getChildById(name)
+  if not widget then
+    widget = g_ui.createWidget('VoipMember', memberList)
+    widget:setId(name)
+  end
+
+  local displayName = isLeader and (name .. " (L)") or name
+  widget:getChildById('name'):setText(displayName)
+  widget:getChildById('name'):setColor(isLeader and '#FFD700' or '#FFFFFF')
   widget:getChildById('vocation'):setText(vocation)
-  if isLeader then
-    widget:getChildById('name'):setColor('#FFD700')
+  widget:getChildById('creature'):setOutfit(outfit)
+  widget:getChildById('healthBar'):setValue(healthPercent, 0, 100)
+  widget:getChildById('manaBar'):setValue(manaPercent, 0, 100)
+end
+
+function onMuteClick(widget)
+  local id = widget:getId()
+  local checked = not widget:isChecked()
+  widget:setChecked(checked)
+
+  if id == "All" then
+    local header = voipWindow:recursiveGetChildById('muteHeader')
+    for _, child in ipairs(header:getChildren()) do
+      child:setChecked(checked)
+      mutedVocations[child:getId()] = checked
+    end
+  else
+    mutedVocations[id] = checked
+    -- Check if all individual buttons are checked -> auto-check All
+    local header = voipWindow:recursiveGetChildById('muteHeader')
+    local allChecked = true
+    for _, child in ipairs(header:getChildren()) do
+      if child:getId() ~= "All" and not child:isChecked() then
+        allChecked = false
+        break
+      end
+    end
+    local allBtn = header:getChildById('All')
+    if allBtn then allBtn:setChecked(allChecked) end
   end
 end
