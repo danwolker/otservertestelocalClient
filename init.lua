@@ -15,7 +15,7 @@ Services = {
 
 -- Servers accept http login url, websocket login url or ip:port:version
 Servers = {
-  LocalServer = "127.0.0.1:7171:1098"
+    LocalServer = "26.226.119.223:7171:1098"
 }
 
 --Server = "ws://otclient.ovh:3000/"
