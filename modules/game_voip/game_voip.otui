@@ -20,6 +20,8 @@ VoipMember < Panel
   height: 26
   margin-top: 2
   background-color: #ffffff08
+  phantom: false
+  @onMouseRelease: modules.game_voip.onMemberClick(self, mousePos, mouseButton)
 
   UICreature
     id: creature

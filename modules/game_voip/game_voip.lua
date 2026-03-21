@@ -3,6 +3,7 @@ voipButton = nil
 voipUpdateEvent = nil
 
 local OPCODE_VOIP = 200
+local OPCODE_SPEAKING = 201
 
 local VOCATION_NAMES = {
   [0] = "None",
@@ -27,9 +28,15 @@ local VOCATION_MUTE_ID = {
 }
 
 -- member data stored by name, populated from server opcode
-local partyData = {}  -- {name -> {vocation, outfit, isLeader}}
+local partyData = {}  -- {name -> {vocID, isLeader}}
 local mutedVocations = {}
+local mutedPlayers = {}
 local pttBinding = nil
+local pttPressed = false
+local checkPttEvent = nil
+
+-- Forward declaration
+local function checkPttState() end
 
 local function split(text, sep)
   local res = {}
@@ -66,6 +73,9 @@ function init()
   ProtocolGame.registerOpcode(0xE1, onVoipClose)
   connect(g_game, { onGameStart = onGameStart, onGameEnd = clearMembers })
   
+  if checkPttEvent then removeEvent(checkPttEvent) end
+  checkPttEvent = scheduleEvent(checkPttState, 100)
+  
   -- Check for PTT binding every second or on session join
   scheduleEvent(updatePttBinding, 1000)
 end
@@ -76,6 +86,12 @@ function terminate()
   ProtocolGame.unregisterOpcode(0xE0)
   ProtocolGame.unregisterOpcode(0xE1)
   disconnect(g_game, { onGameStart = onGameStart, onGameEnd = clearMembers })
+  
+  if checkPttEvent then
+    removeEvent(checkPttEvent)
+    checkPttEvent = nil
+  end
+
   if pttBinding then
     g_keyboard.unbindKeyDown(pttBinding)
     g_keyboard.unbindKeyUp(pttBinding)
@@ -115,12 +131,12 @@ function updateBars()
   for name, data in pairs(partyData) do
     local widget = memberList:getChildById(name)
     if widget then
-      -- Try to find the creature in the local game state
+      -- ONLY update bars locally if the creature is visible AND it's the local player.
+      -- For others, we rely on the server updates to avoid oscillation between different precision values.
       local creature = getCreatureByName(name)
-      if creature then
+      if creature and creature:isLocalPlayer() then
         local hp = creature:getHealthPercent()
         widget:getChildById('healthBar'):setValue(hp, 0, 100)
-        -- UICreature auto-renders the outfit, just ensure it's set once
       end
     end
   end
@@ -150,7 +166,12 @@ function onVoipUpdate(protocol, opcode, buffer)
       local outfitparts = split(parts[3], ",")
       local healthPercent = tonumber(parts[4]) or 0
       local manaPercent = tonumber(parts[5]) or 0
+      local id = tonumber(parts[6]) or 0
+      local isSpeakingRaw = parts[7]
+      local isSpeaking = (tonumber(isSpeakingRaw) == 1)
       local isLeader = (i == 1)
+
+      print("[VoIP] Parsing member: " .. name .. " | ID: " .. id .. " | SpeakingRaw: " .. tostring(isSpeakingRaw) .. " | isSpeaking: " .. tostring(isSpeaking))
 
       local vocName = VOCATION_NAMES[vocID] or "None"
       local outfit = {
@@ -162,7 +183,8 @@ function onVoipUpdate(protocol, opcode, buffer)
         addons = tonumber(outfitparts[6]) or 0,
       }
 
-      partyData[name] = { vocID = vocID, outfit = outfit, isLeader = isLeader }
+      partyData[name] = { id = id, vocID = vocID, outfit = outfit, isLeader = isLeader, isSpeaking = isSpeaking }
+      
       addMember(name, vocName, isLeader, outfit, healthPercent, manaPercent)
       currentMembers[name] = true
     end
@@ -212,7 +234,7 @@ function onVoipSession(protocol, msg)
     
     local vocName = VOCATION_NAMES[member.vocation] or "None"
     
-    partyData[name] = { vocID = member.vocation, isLeader = member.isLeader }
+    partyData[name] = { id = member.playerId, vocID = member.vocation, isLeader = member.isLeader }
     addMember(name, vocName, member.isLeader, nil, 100, 100)
     currentMembers[name] = true
   end
@@ -272,6 +294,39 @@ function addMember(name, vocation, isLeader, outfit, healthPercent, manaPercent)
   if outfit then widget:getChildById('creature'):setOutfit(outfit) end
   widget:getChildById('healthBar'):setValue(healthPercent, 0, 100)
   widget:getChildById('manaBar'):setValue(manaPercent, 0, 100)
+  
+  -- Explicitly bind click event to ensure it works
+  widget.onMouseRelease = onMemberClick
+  
+  refreshMemberUI(name)
+end
+
+function refreshMemberUI(name)
+  local memberList = voipWindow:recursiveGetChildById('voipMemberList')
+  if not memberList then return end
+  local widget = memberList:getChildById(name)
+  if not widget then return end
+
+  local data = partyData[name]
+  if not data then return end
+
+  local vocMuteId = VOCATION_MUTE_ID[data.vocID] or "All"
+  local isMuted = mutedVocations["All"] or mutedVocations[vocMuteId] or mutedPlayers[name]
+  local indicator = widget:getChildById('voiceIndicator')
+
+  if isMuted then
+    indicator:setImageColor('#ff0000') -- Red for Muted
+    indicator:setVisible(true)
+  else
+    -- Use the isSpeaking state from partyData (synced from server)
+    local isSpeaking = data.isSpeaking
+    if name == g_game.getCharacterName() then
+      isSpeaking = pttPressed
+    end
+    
+    indicator:setImageColor('#00ff00') -- Green for Speaking
+    indicator:setVisible(isSpeaking)
+  end
 end
 
 function updatePttBinding()
@@ -329,38 +384,61 @@ end
 
 function onPTTKeyDown()
   if not g_game.isOnline() then return end
-  local localPlayer = g_game.getLocalPlayer()
-  if not localPlayer then return end
+  if pttPressed then return end
   
-  local name = localPlayer:getName()
-  local memberList = voipWindow:recursiveGetChildById('voipMemberList')
-  if not memberList then 
-    print("[VoIP] Error: memberList not found")
-    return 
-  end
-  
-  local widget = memberList:getChildById(name)
-  if widget then
-    print("[VoIP] Showing voice indicator for: " .. name)
-    widget:getChildById('voiceIndicator'):setVisible(true)
+  pttPressed = true
+  print("[VoIP] PTT Key Down - Sending Opcode 201:1 (v2)")
+  local protocol = g_game.getProtocolGame()
+  if protocol then
+    protocol:sendExtendedOpcode(OPCODE_SPEAKING, "1")
   else
-    print("[VoIP] Widget not found for: " .. name)
+    print("[VoIP] Error: No protocol to send opcode 201")
   end
+  
+  local name = g_game.getCharacterName()
+  refreshMemberUI(name)
 end
 
 function onPTTKeyUp()
   if not g_game.isOnline() then return end
-  local localPlayer = g_game.getLocalPlayer()
-  if not localPlayer then return end
+  if not pttPressed then return end
   
-  local name = localPlayer:getName()
-  local memberList = voipWindow:recursiveGetChildById('voipMemberList')
-  if not memberList then return end
+  pttPressed = false
+  print("[VoIP] PTT Key Up - Sending Opcode 201:0 (v2)")
+  local protocol = g_game.getProtocolGame()
+  if protocol then
+    protocol:sendExtendedOpcode(OPCODE_SPEAKING, "0")
+  else
+    print("[VoIP] Error: No protocol to send opcode 201")
+  end
   
-  local widget = memberList:getChildById(name)
-  if widget then
-    print("[VoIP] Hiding voice indicator for: " .. name)
-    widget:getChildById('voiceIndicator'):setVisible(false)
+  local name = g_game.getCharacterName()
+  refreshMemberUI(name)
+end
+
+function checkPttState()
+  checkPttEvent = scheduleEvent(checkPttState, 100)
+  if not pttPressed then return end
+  
+  if not g_window.hasFocus() then
+    print("[VoIP] PTT released due to focus loss")
+    onPTTKeyUp()
+    return
+  end
+  
+  if pttBinding and pttBinding:find("Mouse") then
+    local btn = nil
+    if pttBinding == "MouseLeft" then btn = MouseLeftButton
+    elseif pttBinding == "MouseRight" then btn = MouseRightButton
+    elseif pttBinding == "MouseMiddle" then btn = MouseMiddleButton
+    elseif pttBinding == "Mouse4" then btn = MouseButton4
+    elseif pttBinding == "Mouse5" then btn = MouseButton5
+    end
+    
+    if btn and not g_mouse.isPressed(btn) then
+      print("[VoIP] PTT released due to mouse grab override")
+      onPTTKeyUp()
+    end
   end
 end
 
@@ -388,5 +466,93 @@ function onMuteClick(widget)
     end
     local allBtn = header:getChildById('All')
     if allBtn then allBtn:setChecked(allChecked) end
+    mutedVocations["All"] = allChecked
   end
+
+  -- Refresh all member widgets
+  for name, _ in pairs(partyData) do
+    refreshMemberUI(name)
+  end
+end
+
+function onMemberClick(widget, mousePos, mouseButton)
+  if mouseButton == MouseRightButton then
+    local name = widget:getId()
+    local charName = g_game.getCharacterName()
+    
+    print("[VoIP] Right click on member: " .. tostring(name) .. " (Self: " .. tostring(charName) .. ")")
+    
+    if name == charName then 
+      print("[VoIP] Ignoring right click on SELF")
+      return 
+    end
+
+    local data = partyData[name]
+    if not data then 
+      print("[VoIP] Error: No data for member " .. tostring(name))
+      return 
+    end
+
+    local menu = g_ui.createWidget('PopupMenu')
+    menu:setGameMenu(true)
+
+    local creature = getCreatureByName(name)
+    local localPlayer = g_game.getLocalPlayer()
+
+    -- Seguir
+    menu:addOption('Seguir', function() 
+      if creature then 
+        g_game.follow(creature) 
+      else
+        modules.game_textmessage.displayFailureMessage('Jogador muito longe para seguir.')
+      end
+    end)
+
+    -- Mandar mensagem
+    menu:addOption('Mandar mensagem para ' .. name, function() 
+      g_game.openPrivateChannel(name) 
+    end)
+
+    -- Adicionar VIP
+    if localPlayer and not localPlayer:hasVip(name) then
+      menu:addOption('Adicionar a lista VIP', function() 
+        g_game.addVip(name) 
+      end)
+    end
+
+    -- Ignorar (VoIP Mute)
+    local isMuted = mutedPlayers[name]
+    menu:addOption(isMuted and ('Designorar ' .. name) or ('Ignorar ' .. name), function() 
+      togglePlayerMute(name)
+    end)
+
+    -- Passar Lideranca
+    if localPlayer and localPlayer:isPartyLeader() and not data.isLeader then
+      menu:addOption('Passar lideranca para ' .. name, function() 
+        if data.id and data.id > 0 then
+          g_game.partyPassLeadership(data.id)
+        elseif creature then
+          g_game.partyPassLeadership(creature:getId())
+        else
+          modules.game_textmessage.displayFailureMessage('Não foi possível obter o ID do jogador.')
+        end
+      end)
+    end
+
+    menu:addSeparator()
+
+    -- Copiar Nome
+    menu:addOption('Copiar Nome', function() 
+      g_window.setClipboardText(name) 
+    end)
+    
+    print("[VoIP] Displaying menu for " .. name)
+    menu:display(mousePos)
+    return true
+  end
+end
+
+function togglePlayerMute(name)
+  mutedPlayers[name] = not mutedPlayers[name]
+  refreshMemberUI(name)
 end
