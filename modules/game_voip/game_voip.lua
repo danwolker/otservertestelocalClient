@@ -38,6 +38,18 @@ local function split(text, sep)
   return res
 end
 
+local function getCreatureByName(name)
+  local player = g_game.getLocalPlayer()
+  if not player then return nil end
+  local spectators = g_map.getSpectators(player:getPosition(), false)
+  for _, spec in ipairs(spectators) do
+    if spec:getName():lower() == name:lower() then
+      return spec
+    end
+  end
+  return nil
+end
+
 function init()
   voipButton = modules.client_topmenu.addRightGameToggleButton(
     'voipButton', tr('Party VoIP'), '/data/images/topbuttons/audio', toggle
@@ -49,13 +61,17 @@ function init()
   voipWindow:close()
 
   ProtocolGame.registerExtendedOpcode(OPCODE_VOIP, onVoipUpdate)
-  connect(g_game, { onGameEnd = clearMembers })
+  ProtocolGame.registerOpcode(0xE0, onVoipSession)
+  ProtocolGame.registerOpcode(0xE1, onVoipClose)
+  connect(g_game, { onGameStart = onGameStart, onGameEnd = clearMembers })
 end
 
 function terminate()
   removeEvent(voipUpdateEvent)
   ProtocolGame.unregisterExtendedOpcode(OPCODE_VOIP)
-  disconnect(g_game, { onGameEnd = clearMembers })
+  ProtocolGame.unregisterOpcode(0xE0)
+  ProtocolGame.unregisterOpcode(0xE1)
+  disconnect(g_game, { onGameStart = onGameStart, onGameEnd = clearMembers })
   if voipButton then voipButton:destroy() end
   if voipWindow then voipWindow:destroy() end
 end
@@ -74,6 +90,10 @@ function onMiniWindowClose()
   voipButton:setOn(false)
 end
 
+function onGameStart()
+  clearMembers()
+end
+
 -- Called every 500ms to update HP/mana bars from local creature objects
 function updateBars()
   removeEvent(voipUpdateEvent)
@@ -87,7 +107,7 @@ function updateBars()
     local widget = memberList:getChildById(name)
     if widget then
       -- Try to find the creature in the local game state
-      local creature = g_map.getCreatureByName(name)
+      local creature = getCreatureByName(name)
       if creature then
         local hp = creature:getHealthPercent()
         widget:getChildById('healthBar'):setValue(hp, 0, 100)
@@ -119,8 +139,8 @@ function onVoipUpdate(protocol, opcode, buffer)
       local name = parts[1]
       local vocID = tonumber(parts[2]) or 0
       local outfitparts = split(parts[3], ",")
-      local hpPercent = tonumber(parts[4]) or 0
-      local mpPercent = tonumber(parts[5]) or 0
+      local healthPercent = tonumber(parts[4]) or 0
+      local manaPercent = tonumber(parts[5]) or 0
       local isLeader = (i == 1)
 
       local vocName = VOCATION_NAMES[vocID] or "None"
@@ -134,7 +154,7 @@ function onVoipUpdate(protocol, opcode, buffer)
       }
 
       partyData[name] = { vocID = vocID, outfit = outfit, isLeader = isLeader }
-      addMember(name, vocName, isLeader, outfit, hpPercent, mpPercent)
+      addMember(name, vocName, isLeader, outfit, healthPercent, manaPercent)
       currentMembers[name] = true
     end
   end
@@ -152,6 +172,64 @@ function onVoipUpdate(protocol, opcode, buffer)
   if not voipUpdateEvent then
     voipUpdateEvent = scheduleEvent(updateBars, 500)
   end
+end
+
+function onVoipSession(protocol, msg)
+  local session = {
+    roomId = msg:getString(),
+    sessionKey = msg:getString(),
+    wsUrl = msg:getString(),
+    selfPlayerId = msg:getU32(),
+    members = {}
+  }
+
+  local memberCount = msg:getU8()
+  local currentMembers = {}
+  local memberList = voipWindow:recursiveGetChildById('voipMemberList')
+  
+  if voipWindow:recursiveGetChildById('descriptionLabel') then
+    voipWindow:recursiveGetChildById('descriptionLabel'):hide()
+  end
+
+  for i = 1, memberCount do
+    local name = msg:getString()
+    local member = {
+      playerId = msg:getU32(),
+      name = name,
+      vocation = msg:getU8(),
+      isLeader = msg:getU8() == 1,
+      mutedGlobal = msg:getU8() == 1
+    }
+    
+    local vocName = VOCATION_NAMES[member.vocation] or "None"
+    
+    partyData[name] = { vocID = member.vocation, isLeader = member.isLeader }
+    addMember(name, vocName, member.isLeader, nil, 100, 100)
+    currentMembers[name] = true
+  end
+
+  -- Remove members that left
+  for _, child in ipairs(memberList:getChildren()) do
+    local childName = child:getId()
+    if not currentMembers[childName] then
+      partyData[childName] = nil
+      child:destroy()
+    end
+  end
+
+  voipWindow:open()
+  voipButton:setOn(true)
+
+  if not voipUpdateEvent then
+    voipUpdateEvent = scheduleEvent(updateBars, 500)
+  end
+end
+
+function onVoipClose(protocol, msg)
+  local roomId = msg:getString()
+  voipWindow:close()
+  voipButton:setOn(false)
+  clearMembers()
 end
 
 function clearMembers()
@@ -182,7 +260,7 @@ function addMember(name, vocation, isLeader, outfit, healthPercent, manaPercent)
   widget:getChildById('name'):setText(displayName)
   widget:getChildById('name'):setColor(isLeader and '#FFD700' or '#FFFFFF')
   widget:getChildById('vocation'):setText(vocation)
-  widget:getChildById('creature'):setOutfit(outfit)
+  if outfit then widget:getChildById('creature'):setOutfit(outfit) end
   widget:getChildById('healthBar'):setValue(healthPercent, 0, 100)
   widget:getChildById('manaBar'):setValue(manaPercent, 0, 100)
 end

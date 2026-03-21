@@ -50,7 +50,6 @@ elseif settings:exists('layout') then
   layout = settings:getValue('layout')
 end
 g_resources.setLayout(layout)
-
 -- load mods
 g_modules.discoverModules()
 g_modules.ensureModuleLoaded("corelib")
