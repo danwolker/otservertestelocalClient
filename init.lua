@@ -14,8 +14,10 @@ Services = {
 }
 
 -- Servers accept http login url, websocket login url or ip:port:version
+local serverIp = os.getenv("OTCLIENT_IP") or "26.226.119.223"
+g_logger.info(">> Login IP configured in init.lua: " .. serverIp)
 Servers = {
-    LocalServer = "26.226.119.223:7171:1098"
+    LocalServer = serverIp .. ":7171:1098"
 }
 
 --Server = "ws://otclient.ovh:3000/"
