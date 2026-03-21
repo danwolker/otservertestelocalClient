@@ -291,6 +291,7 @@ function updatePttBinding()
 
   pttBinding = hotkey
   if pttBinding and pttBinding ~= "" then
+    print("[VoIP] Binding PTT to: " .. pttBinding)
     if pttBinding:find("Mouse") then
       connect(root, { onMousePress = onMousePTTKeyDown, onMouseRelease = onMousePTTKeyUp })
     else
@@ -333,12 +334,18 @@ function onPTTKeyDown()
   
   local name = localPlayer:getName()
   local memberList = voipWindow:recursiveGetChildById('voipMemberList')
-  local widget = memberList:getChildById(name)
-  if widget then
-    widget:getChildById('voiceIndicator'):setVisible(true)
+  if not memberList then 
+    print("[VoIP] Error: memberList not found")
+    return 
   end
   
-  -- Future: g_game.startVoiceCapture()
+  local widget = memberList:getChildById(name)
+  if widget then
+    print("[VoIP] Showing voice indicator for: " .. name)
+    widget:getChildById('voiceIndicator'):setVisible(true)
+  else
+    print("[VoIP] Widget not found for: " .. name)
+  end
 end
 
 function onPTTKeyUp()
@@ -348,12 +355,13 @@ function onPTTKeyUp()
   
   local name = localPlayer:getName()
   local memberList = voipWindow:recursiveGetChildById('voipMemberList')
+  if not memberList then return end
+  
   local widget = memberList:getChildById(name)
   if widget then
+    print("[VoIP] Hiding voice indicator for: " .. name)
     widget:getChildById('voiceIndicator'):setVisible(false)
   end
-  
-  -- Future: g_game.stopVoiceCapture()
 end
 
 function onMuteClick(widget)
