@@ -1,55 +1,182 @@
+VoipMuteButton < UIButton
+  size: 26 18
+  background-color: #555555
+  border: 1 #888888
+  text-align: center
+  font: verdana-11px-monochrome
+  color: #ffffff
+  phantom: false
+  focusable: false
+
+  $hover !disabled:
+    background-color: #777777
+
+  $checked:
+    background-color: #993333
+    border: 1 #ff6666
+    color: #ffcccc
+
 VoipMember < Panel
-  height: 25
+  height: 26
   margin-top: 2
-  background-color: #ffffff11
+  background-color: #ffffff08
+
+  UICreature
+    id: creature
+    anchors.left: parent.left
+    anchors.top: parent.top
+    size: 24 24
+    margin-left: 2
+    margin-top: 1
+    old-scaling: true
+    phantom: true
+
+  UIWidget
+    id: spacer
+    width: 2
+    anchors.left: creature.right
+    anchors.top: parent.top
+    phantom: true
 
   Label
     id: name
-    anchors.left: parent.left
+    anchors.left: spacer.right
     anchors.top: parent.top
-    margin-left: 5
-    width: 100
-    !text: tr('Unknown')
+    height: 13
+    margin-top: 1
+    color: #ffffff
+    font: verdana-11px-monochrome
+    text-auto-resize: true
+    phantom: true
+
+  LifeProgressBar
+    id: healthBar
+    anchors.left: spacer.left
+    anchors.right: parent.right
+    anchors.top: name.bottom
+    height: 5
+    margin-right: 5
+    margin-top: 1
+    phantom: true
+
+  ManaBar
+    id: manaBar
+    anchors.left: spacer.left
+    anchors.right: parent.right
+    anchors.top: healthBar.bottom
+    height: 4
+    margin-right: 5
+    margin-top: 1
+    phantom: true
 
   Label
     id: vocation
     anchors.right: parent.right
     anchors.top: parent.top
     margin-right: 5
-    width: 80
-    text-align: right
-    color: #bbbbbb
-    !text: tr('None')
+    margin-top: 1
+    color: #aaaaaa
+    font: verdana-11px-monochrome
+    text-auto-resize: true
+    phantom: true
+    !text: tr('')
+
+  UIWidget
+    id: voiceIndicator
+    anchors.right: vocation.left
+    anchors.top: parent.top
+    size: 12 12
+    margin-right: 4
+    margin-top: 2
+    image-source: /images/topbuttons/audio
+    image-color: #00ff00
+    visible: false
+    phantom: true
 
 MiniWindow
   id: voipWindow
   !text: tr('Party VoIP')
   height: 150
-  icon: /images/topbuttons/audio
+  icon: /data/images/topbuttons/audio
   @onClose: modules.game_voip.onMiniWindowClose()
   &save: true
   &autoOpen: false
 
   MiniWindowContents
-    layout: verticalBox
-    padding-left: 5
-    padding-right: 5
+    Panel
+      id: muteHeader
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      height: 22
+      background-color: #00000055
+      layout:
+        type: horizontalBox
+        spacing: 4
+        content-margins-left: 4
+        content-margins-top: 2
+
+      VoipMuteButton
+        id: Knight
+        !text: tr('Kni')
+        !tooltip: tr('Mute Knights')
+        @onClick: modules.game_voip.onMuteClick(self)
+
+      VoipMuteButton
+        id: Druid
+        !text: tr('Dru')
+        !tooltip: tr('Mute Druids')
+        @onClick: modules.game_voip.onMuteClick(self)
+
+      VoipMuteButton
+        id: Sorcerer
+        !text: tr('Sor')
+        !tooltip: tr('Mute Sorcerers')
+        @onClick: modules.game_voip.onMuteClick(self)
+
+      VoipMuteButton
+        id: Paladin
+        !text: tr('Pal')
+        !tooltip: tr('Mute Paladins')
+        @onClick: modules.game_voip.onMuteClick(self)
+
+      VoipMuteButton
+        id: Monk
+        !text: tr('Mnk')
+        !tooltip: tr('Mute Monks')
+        @onClick: modules.game_voip.onMuteClick(self)
+
+      VoipMuteButton
+        id: All
+        !text: tr('ALL')
+        !tooltip: tr('Mute All')
+        background-color: #444477
+        @onClick: modules.game_voip.onMuteClick(self)
+        $checked:
+          background-color: #993333
+
+    HorizontalSeparator
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 2
 
     Label
       id: descriptionLabel
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
       !text: tr('No active call.')
       text-auto-resize: true
-      margin-top: 5
+      margin-top: 4
       color: #aaaaaa
-
-    VerticalSeparator
-      margin-top: 5
 
     Panel
       id: voipMemberList
       anchors.top: prev.bottom
       anchors.left: parent.left
       anchors.right: parent.right
-      layout: verticalBox
-      fit-children: true
-      margin-top: 5
+      margin-top: 4
+      layout:
+        type: verticalBox
+        fit-children: true
