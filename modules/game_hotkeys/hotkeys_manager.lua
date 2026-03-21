@@ -40,6 +40,8 @@ hotkeysList = {}
 hotkeyConfigs = {}
 currentConfig = 1
 configValueChanged = false
+pttButton = nil
+pttHotkey = nil
 
 -- public functions
 function init()
@@ -63,6 +65,7 @@ function init()
   useOnSelf = hotkeysWindow:getChildById('useOnSelf')
   useOnTarget = hotkeysWindow:getChildById('useOnTarget')
   useWith = hotkeysWindow:getChildById('useWith')
+  pttButton = hotkeysWindow:getChildById('pttButton')
 
   useRadioGroup = UIRadioGroup.create()
   useRadioGroup:addWidget(useOnSelf)
@@ -165,6 +168,11 @@ function load(forceDefaults)
   
   configSelector:setCurrentIndex(currentConfig, true)
 
+  pttHotkey = hotkeyConfigs[currentConfig]:getString('pttHotkey')
+  if pttButton then
+    pttButton:setText(pttHotkey or tr('Assign PTT'))
+  end
+
   local hotkeySettings = hotkeyConfigs[currentConfig]:getNode('hotkeys')
   local hotkeys = {}
 
@@ -233,6 +241,7 @@ function save()
 
   hotkeyList = hotkeySettings
   hotkeyConfigs[currentConfig]:setNode('hotkeys', hotkeySettings)
+  hotkeyConfigs[currentConfig]:set('pttHotkey', pttHotkey)
   hotkeyConfigs[currentConfig]:save()
   
   local index = g_game.getCharacterName() .. "_" .. g_game.getClientVersion()
@@ -705,4 +714,54 @@ end
 function hotkeyCaptureOk(assignWindow, keyCombo)
   addKeyCombo(keyCombo, nil, true)
   assignWindow:destroy()
+end
+
+function assignPtt()
+  local assignWindow = g_ui.createWidget('HotkeyAssignWindow', rootWidget)
+  assignWindow:grabKeyboard()
+  assignWindow:grabMouse()
+  assignWindow:getChildById('comboPreview'):setText(tr('Current hotkey to add: %s', 'none'))
+  
+  local function updateCombo(keyCombo)
+    assignWindow:getChildById('comboPreview'):setText(tr('Current hotkey to add: %s', keyCombo))
+    assignWindow:getChildById('comboPreview').keyCombo = keyCombo
+    assignWindow:getChildById('addButton'):enable()
+  end
+
+  assignWindow.onKeyDown = function(window, keyCode, modifiers)
+    local keyCombo = determineKeyComboDesc(keyCode, modifiers)
+    updateCombo(keyCombo)
+    return true
+  end
+
+  assignWindow.onMousePress = function(window, mousePos, mouseButton)
+    local child = window:recursiveGetChildByPos(mousePos)
+    if child and (child:getId() == 'addButton' or child:getId() == 'cancelButton') then
+      return false
+    end
+
+    local combo = ""
+    if mouseButton == MouseLeftButton then combo = "MouseLeft"
+    elseif mouseButton == MouseRightButton then combo = "MouseRight"
+    elseif mouseButton == MouseMiddleButton then combo = "MouseMiddle"
+    elseif mouseButton == MouseButton4 then combo = "Mouse4"
+    elseif mouseButton == MouseButton5 then combo = "Mouse5"
+    end
+    
+    if combo ~= "" then
+      updateCombo(combo)
+      return true
+    end
+  end
+
+  assignWindow:getChildById('addButton').onClick = function()
+    pttHotkey = assignWindow:getChildById('comboPreview').keyCombo
+    pttButton:setText(pttHotkey)
+    configValueChanged = true
+    assignWindow:destroy()
+  end
+end
+
+function getPttHotkey()
+  return pttHotkey
 end

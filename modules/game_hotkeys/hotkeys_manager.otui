@@ -11,7 +11,7 @@ HotkeyListLabel < UILabel
 MainWindow
   id: hotkeysWindow
   !text: tr('Hotkeys')
-  size: 370 475
+  size: 370 510
 
   @onEnter: modules.game_hotkeys.ok()
   @onEscape: modules.game_hotkeys.cancel()
@@ -163,6 +163,23 @@ MainWindow
     anchors.top: prev.bottom
     margin-top: 2
     @onClick: modules.game_hotkeys.clearObject()
+
+  Label
+    id: pttLabel
+    !text: tr('Push-to-Talk:')
+    anchors.left: parent.left
+    anchors.top: prev.bottom
+    margin-top: 8
+
+  Button
+    id: pttButton
+    !text: tr('Assign PTT')
+    width: 128
+    anchors.left: selectObjectButton.left
+    anchors.right: selectObjectButton.right
+    anchors.top: pttLabel.top
+    margin-top: -4
+    @onClick: modules.game_hotkeys.assignPtt()
 
   ButtonBox
     id: useOnSelf

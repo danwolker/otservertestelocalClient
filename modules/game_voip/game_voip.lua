@@ -29,6 +29,7 @@ local VOCATION_MUTE_ID = {
 -- member data stored by name, populated from server opcode
 local partyData = {}  -- {name -> {vocation, outfit, isLeader}}
 local mutedVocations = {}
+local pttBinding = nil
 
 local function split(text, sep)
   local res = {}
@@ -64,6 +65,9 @@ function init()
   ProtocolGame.registerOpcode(0xE0, onVoipSession)
   ProtocolGame.registerOpcode(0xE1, onVoipClose)
   connect(g_game, { onGameStart = onGameStart, onGameEnd = clearMembers })
+  
+  -- Check for PTT binding every second or on session join
+  scheduleEvent(updatePttBinding, 1000)
 end
 
 function terminate()
@@ -72,6 +76,10 @@ function terminate()
   ProtocolGame.unregisterOpcode(0xE0)
   ProtocolGame.unregisterOpcode(0xE1)
   disconnect(g_game, { onGameStart = onGameStart, onGameEnd = clearMembers })
+  if pttBinding then
+    g_keyboard.unbindKeyDown(pttBinding)
+    g_keyboard.unbindKeyUp(pttBinding)
+  end
   if voipButton then voipButton:destroy() end
   if voipWindow then voipWindow:destroy() end
 end
@@ -92,6 +100,7 @@ end
 
 function onGameStart()
   clearMembers()
+  updatePttBinding()
 end
 
 -- Called every 500ms to update HP/mana bars from local creature objects
@@ -263,6 +272,88 @@ function addMember(name, vocation, isLeader, outfit, healthPercent, manaPercent)
   if outfit then widget:getChildById('creature'):setOutfit(outfit) end
   widget:getChildById('healthBar'):setValue(healthPercent, 0, 100)
   widget:getChildById('manaBar'):setValue(manaPercent, 0, 100)
+end
+
+function updatePttBinding()
+  if not modules.game_hotkeys then return end
+  local hotkey = modules.game_hotkeys.getPttHotkey()
+  if hotkey == pttBinding then 
+    scheduleEvent(updatePttBinding, 2000)
+    return 
+  end
+
+  local root = modules.game_interface.getRootPanel()
+  if pttBinding then
+    g_keyboard.unbindKeyDown(pttBinding)
+    g_keyboard.unbindKeyUp(pttBinding)
+    disconnect(root, { onMousePress = onMousePTTKeyDown, onMouseRelease = onMousePTTKeyUp })
+  end
+
+  pttBinding = hotkey
+  if pttBinding and pttBinding ~= "" then
+    if pttBinding:find("Mouse") then
+      connect(root, { onMousePress = onMousePTTKeyDown, onMouseRelease = onMousePTTKeyUp })
+    else
+      g_keyboard.bindKeyDown(pttBinding, onPTTKeyDown)
+      g_keyboard.bindKeyUp(pttBinding, onPTTKeyUp)
+    end
+  end
+  
+  scheduleEvent(updatePttBinding, 2000)
+end
+
+function getMouseButtonName(mouseButton)
+  if mouseButton == MouseLeftButton then return "MouseLeft"
+  elseif mouseButton == MouseRightButton then return "MouseRight"
+  elseif mouseButton == MouseMiddleButton then return "MouseMiddle"
+  elseif mouseButton == MouseButton4 then return "Mouse4"
+  elseif mouseButton == MouseButton5 then return "Mouse5"
+  end
+  return ""
+end
+
+function onMousePTTKeyDown(self, mousePos, mouseButton)
+  if getMouseButtonName(mouseButton) == pttBinding then
+    onPTTKeyDown()
+    return true
+  end
+end
+
+function onMousePTTKeyUp(self, mousePos, mouseButton)
+  if getMouseButtonName(mouseButton) == pttBinding then
+    onPTTKeyUp()
+    return true
+  end
+end
+
+function onPTTKeyDown()
+  if not g_game.isOnline() then return end
+  local localPlayer = g_game.getLocalPlayer()
+  if not localPlayer then return end
+  
+  local name = localPlayer:getName()
+  local memberList = voipWindow:recursiveGetChildById('voipMemberList')
+  local widget = memberList:getChildById(name)
+  if widget then
+    widget:getChildById('voiceIndicator'):setVisible(true)
+  end
+  
+  -- Future: g_game.startVoiceCapture()
+end
+
+function onPTTKeyUp()
+  if not g_game.isOnline() then return end
+  local localPlayer = g_game.getLocalPlayer()
+  if not localPlayer then return end
+  
+  local name = localPlayer:getName()
+  local memberList = voipWindow:recursiveGetChildById('voipMemberList')
+  local widget = memberList:getChildById(name)
+  if widget then
+    widget:getChildById('voiceIndicator'):setVisible(false)
+  end
+  
+  -- Future: g_game.stopVoiceCapture()
 end
 
 function onMuteClick(widget)

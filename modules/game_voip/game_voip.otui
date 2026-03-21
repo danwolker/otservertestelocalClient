@@ -81,6 +81,18 @@ VoipMember < Panel
     phantom: true
     !text: tr('')
 
+  UIWidget
+    id: voiceIndicator
+    anchors.right: vocation.left
+    anchors.top: parent.top
+    size: 12 12
+    margin-right: 4
+    margin-top: 2
+    image-source: /images/topbuttons/audio
+    image-color: #00ff00
+    visible: false
+    phantom: true
+
 MiniWindow
   id: voipWindow
   !text: tr('Party VoIP')
