@@ -1,4 +1,4 @@
-VoipMuteButton < UIButton
+VoipMuteButton < UICheckBox
   size: 26 18
   background-color: #555555
   border: 1 #888888
@@ -47,6 +47,17 @@ VoipMember < Panel
     color: #ffffff
     font: verdana-11px-monochrome
     text-auto-resize: true
+    phantom: true
+
+  UIWidget
+    id: voiceIndicator
+    anchors.left: name.right
+    anchors.top: name.top
+    margin-left: 4
+    margin-top: 1
+    size: 10 10
+    background-color: alpha
+    visible: false
     phantom: true
 
   LifeProgressBar

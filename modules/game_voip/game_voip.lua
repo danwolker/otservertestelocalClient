@@ -373,7 +373,7 @@ function refreshMemberUI(name)
   local indicator = widget:getChildById('voiceIndicator')
 
   if isMuted then
-    indicator:setImageColor('#ff0000') -- Red for Muted
+    indicator:setBackgroundColor('#ff0000') -- Red for Muted
     indicator:setVisible(true)
   else
     -- Use the isSpeaking state from partyData (synced from server)
@@ -382,27 +382,39 @@ function refreshMemberUI(name)
       isSpeaking = pttPressed
     end
     
-    indicator:setImageColor('#00ff00') -- Green for Speaking
+    indicator:setBackgroundColor('#00ff00') -- Green for Speaking
     indicator:setVisible(isSpeaking)
   end
 end
 
 function updatePttBinding()
-  if not modules.game_hotkeys then return end
-  local hotkey = modules.game_hotkeys.getPttHotkey()
-  if hotkey == pttBinding then 
-    scheduleEvent(updatePttBinding, 2000)
+  if not g_game.isOnline() then
+    scheduleEvent(updatePttBinding, 1000)
+    return
+  end
+
+  local charName = g_game.getCharacterName()
+  local newBinding = g_settings.getString('voipPtt_' .. charName, '')
+  if newBinding == "None" or newBinding == "none" then
+    newBinding = ""
+  end
+
+  if newBinding == pttBinding then 
+    scheduleEvent(updatePttBinding, 500)
     return 
   end
 
   local root = modules.game_interface.getRootPanel()
-  if pttBinding then
-    g_keyboard.unbindKeyDown(pttBinding)
-    g_keyboard.unbindKeyUp(pttBinding)
-    disconnect(root, { onMousePress = onMousePTTKeyDown, onMouseRelease = onMousePTTKeyUp })
+  if pttBinding and pttBinding ~= "" then
+    if pttBinding:find("Mouse") then
+      disconnect(root, { onMousePress = onMousePTTKeyDown, onMouseRelease = onMousePTTKeyUp })
+    else
+      g_keyboard.unbindKeyDown(pttBinding, onPTTKeyDown)
+      g_keyboard.unbindKeyUp(pttBinding, onPTTKeyUp)
+    end
   end
 
-  pttBinding = hotkey
+  pttBinding = newBinding
   if pttBinding and pttBinding ~= "" then
     print("[VoIP] Binding PTT to: " .. pttBinding)
     if pttBinding:find("Mouse") then
@@ -413,17 +425,17 @@ function updatePttBinding()
     end
   end
   
-  scheduleEvent(updatePttBinding, 2000)
+  scheduleEvent(updatePttBinding, 500)
 end
 
 function getMouseButtonName(mouseButton)
   if mouseButton == MouseLeftButton then return "MouseLeft"
   elseif mouseButton == MouseRightButton then return "MouseRight"
-  elseif mouseButton == MouseMiddleButton then return "MouseMiddle"
+  elseif mouseButton == MouseMidButton then return "MouseMiddle"
   elseif mouseButton == MouseButton4 then return "Mouse4"
   elseif mouseButton == MouseButton5 then return "Mouse5"
   end
-  return ""
+  return "Mouse" .. tostring(mouseButton)
 end
 
 function onMousePTTKeyDown(self, mousePos, mouseButton)

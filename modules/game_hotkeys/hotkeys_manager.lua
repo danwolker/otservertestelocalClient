@@ -192,7 +192,9 @@ end
 function unload()
   local gameRootPanel = modules.game_interface.getRootPanel()
   for keyCombo,callback in pairs(boundCombosCallback) do
-    g_keyboard.unbindKeyPress(keyCombo, callback, gameRootPanel)
+    if not keyCombo:find("Mouse") then
+      g_keyboard.unbindKeyPress(keyCombo, callback, gameRootPanel)
+    end
   end
   boundCombosCallback = {}
   currentHotkeys:destroyChildren()
@@ -209,6 +211,25 @@ end
 function reload()
   unload()
   load()
+end
+
+function updatePttLabel()
+  local pttLabel = hotkeysWindow:getChildById('pttLabel')
+  if not pttLabel then return end
+
+  local currentPtt = "None"
+  if g_game.isOnline() then
+    currentPtt = g_settings.getString('voipPtt_' .. g_game.getCharacterName(), 'None')
+    if currentPtt == "" then currentPtt = "None" end
+  end
+  pttLabel:setText(tr('Push-to-Talk: %s', currentPtt))
+  
+  -- Force physical visual refresh across entire table
+  if currentHotkeys then
+    for _, child in pairs(currentHotkeys:getChildren()) do
+      updateHotkeyLabel(child)
+    end
+  end
 end
 
 function save()
@@ -337,6 +358,24 @@ function addHotkey()
   local comboLabel = assignWindow:getChildById('comboPreview')
   comboLabel.keyCombo = ''
   assignWindow.onKeyDown = hotkeyCapture
+  assignWindow.onMousePress = hotkeyCaptureMouse
+end
+
+function hotkeyCaptureMouse(assignWindow, mousePos, mouseButton)
+  if mouseButton == MouseLeftButton or mouseButton == MouseRightButton then return false end
+  local buttonName = ""
+  if mouseButton == MouseMidButton then buttonName = "MouseMiddle"
+  elseif mouseButton == MouseButton4 then buttonName = "Mouse4"
+  elseif mouseButton == MouseButton5 then buttonName = "Mouse5"
+  else buttonName = "Mouse" .. tostring(mouseButton)
+  end
+
+  local comboPreview = assignWindow:getChildById('comboPreview')
+  comboPreview:setText(tr('Current hotkey to add: %s', buttonName))
+  comboPreview.keyCombo = buttonName
+  comboPreview:resizeToText()
+  assignWindow:getChildById('addButton'):enable()
+  return true
 end
 
 function addKeyCombo(keyCombo, keySettings, focus)
@@ -394,13 +433,18 @@ function addKeyCombo(keyCombo, keySettings, focus)
     end
 
     boundCombosCallback[keyCombo] = function(k, c, ticks) prepareKeyCombo(keyCombo, ticks) end
-    g_keyboard.bindKeyPress(keyCombo, boundCombosCallback[keyCombo], gameRootPanel)
+    
+    if not keyCombo:find("Mouse") then
+      g_keyboard.bindKeyPress(keyCombo, boundCombosCallback[keyCombo], gameRootPanel)
+    end
         
     if not keyCombo:lower():find("ctrl") then
       local keyComboCtrl = "Ctrl+" .. keyCombo
       if not boundCombosCallback[keyComboCtrl] then
         boundCombosCallback[keyComboCtrl] = function(k, c, ticks) prepareKeyCombo(keyComboCtrl, ticks) end
-        g_keyboard.bindKeyPress(keyComboCtrl, boundCombosCallback[keyComboCtrl], gameRootPanel)   
+        if not keyComboCtrl:find("Mouse") then
+          g_keyboard.bindKeyPress(keyComboCtrl, boundCombosCallback[keyComboCtrl], gameRootPanel)   
+        end
       end
     end
   end
@@ -546,6 +590,13 @@ function updateHotkeyLabel(hotkeyLabel)
       hotkeyLabel:setColor(HotkeyColors.text)
     end
   end
+
+  local pttHotkey = ""
+  if g_game.isOnline() then pttHotkey = g_settings.getString('voipPtt_' .. g_game.getCharacterName(), '') end
+  if pttHotkey == hotkeyLabel.keyCombo and pttHotkey ~= "" then
+    hotkeyLabel:setText(hotkeyLabel:getText() .. " (Push-to-Talk)")
+    hotkeyLabel:setColor('#00FF00')
+  end
 end
 
 function updateHotkeyForm(reset)
@@ -627,16 +678,20 @@ function updateHotkeyForm(reset)
     sendAutomatically:setChecked(false)
     currentItemPreview:clearItem()
   end
+  updatePttLabel()
 end
 
 function removeHotkey()
   if currentHotkeyLabel == nil then return end
   local gameRootPanel = modules.game_interface.getRootPanel()
   configValueChanged = true
-  g_keyboard.unbindKeyPress(currentHotkeyLabel.keyCombo, boundCombosCallback[currentHotkeyLabel.keyCombo], gameRootPanel)
+  if not currentHotkeyLabel.keyCombo:find("Mouse") then
+    g_keyboard.unbindKeyPress(currentHotkeyLabel.keyCombo, boundCombosCallback[currentHotkeyLabel.keyCombo], gameRootPanel)
+  end
   boundCombosCallback[currentHotkeyLabel.keyCombo] = nil
   currentHotkeyLabel:destroy()
   currentHotkeyLabel = nil
+  updatePttLabel()
 end
 
 function updateHotkeyAction()
@@ -646,6 +701,7 @@ function updateHotkeyAction()
   currentHotkeyLabel.action = translateActionComboboxIndexToAction(hotkeysWindow.action.currentIndex)
   updateHotkeyLabel(currentHotkeyLabel)
   updateHotkeyForm()
+  updatePttLabel()
 end
 
 function onHotkeyTextChange(value)
@@ -705,4 +761,90 @@ end
 function hotkeyCaptureOk(assignWindow, keyCombo)
   addKeyCombo(keyCombo, nil, true)
   assignWindow:destroy()
+end
+
+function startPttCapture()
+  local assignWindow = rootWidget:getChildById('assignWindow')
+  if assignWindow then
+    assignWindow:raise()
+    assignWindow:focus()
+    return
+  end
+
+  assignWindow = g_ui.createWidget('HotkeyAssignWindow', rootWidget)
+  assignWindow:grabKeyboard()
+
+  local comboLabel = assignWindow:getChildById('comboPreview')
+  comboLabel.keyCombo = ''
+  comboLabel:setText(tr('Current PTT hotkey to add: %s', 'none'))
+  assignWindow.onKeyDown = pttCapture
+  assignWindow.onMousePress = pttCaptureMouse
+  
+  local addButton = assignWindow:getChildById('addButton')
+  addButton:hide()
+  
+  local pttAddButton = g_ui.createWidget('Button', assignWindow)
+  pttAddButton:setId('pttAddButton')
+  pttAddButton:setText(tr('Add'))
+  pttAddButton:setWidth(64)
+  pttAddButton:addAnchor(AnchorRight, 'cancelButton', AnchorLeft)
+  pttAddButton:addAnchor(AnchorBottom, 'parent', AnchorBottom)
+  pttAddButton:setMarginRight(10)
+  pttAddButton:disable()
+  
+  pttAddButton.onClick = function() pttCaptureOk(assignWindow, comboLabel.keyCombo) end
+end
+
+function pttCapture(assignWindow, keyCode, keyboardModifiers)
+  local keyCombo = determineKeyComboDesc(keyCode, keyboardModifiers)
+  local comboPreview = assignWindow:getChildById('comboPreview')
+  comboPreview:setText(tr('Current PTT hotkey to add: %s', keyCombo))
+  comboPreview.keyCombo = keyCombo
+  comboPreview:resizeToText()
+  assignWindow:getChildById('pttAddButton'):enable()
+  return true
+end
+
+function pttCaptureMouse(assignWindow, mousePos, mouseButton)
+  -- Ignore Left and Right clicks so the user can easily click "Adicionar" or "Cancelar" sem reescrever o atalho
+  if mouseButton == MouseLeftButton or mouseButton == MouseRightButton then
+    return false
+  end
+
+  local buttonName = ""
+  if mouseButton == MouseMidButton then buttonName = "MouseMiddle"
+  elseif mouseButton == MouseButton4 then buttonName = "Mouse4"
+  elseif mouseButton == MouseButton5 then buttonName = "Mouse5"
+  else buttonName = "Mouse" .. tostring(mouseButton)
+  end
+
+  local comboPreview = assignWindow:getChildById('comboPreview')
+  comboPreview:setText(tr('Current PTT hotkey to add: %s', buttonName))
+  comboPreview.keyCombo = buttonName
+  comboPreview:resizeToText()
+  assignWindow:getChildById('pttAddButton'):enable()
+  return true
+end
+
+function pttCaptureOk(assignWindow, keyCombo)
+  if keyCombo == '' then return end
+  
+  if g_game.isOnline() then
+    local charName = g_game.getCharacterName()
+    g_settings.set('voipPtt_' .. charName, keyCombo)
+  end
+
+  if not currentHotkeys:getChildById(keyCombo) then
+    addKeyCombo(keyCombo, nil, true)
+  else
+    updateHotkeyLabel(currentHotkeys:getChildById(keyCombo))
+  end
+  
+  for _, child in pairs(currentHotkeys:getChildren()) do
+    updateHotkeyLabel(child)
+  end
+
+  assignWindow:destroy()
+  updatePttLabel()
+  if modules.game_voip and modules.game_voip.updatePttBinding then modules.game_voip.updatePttBinding() end
 end
