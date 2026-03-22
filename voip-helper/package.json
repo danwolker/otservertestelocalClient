@@ -1,0 +1,21 @@
+{
+  "name": "voip-helper",
+  "version": "1.0.0",
+  "description": "Voice over IP helper for OTClientV8",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "jest --testPathPattern=__tests__",
+    "test:coverage": "jest --testPathPattern=__tests__ --coverage"
+  },
+  "dependencies": {
+    "naudiodon": "^2.0.0",
+    "node-record-lpcm16": "^1.0.1",
+    "opusscript": "^0.1.1",
+    "speaker": "^0.5.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
