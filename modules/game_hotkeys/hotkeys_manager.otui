@@ -11,7 +11,7 @@ HotkeyListLabel < UILabel
 MainWindow
   id: hotkeysWindow
   !text: tr('Hotkeys')
-  size: 370 510
+  size: 370 515
 
   @onEnter: modules.game_hotkeys.ok()
   @onEscape: modules.game_hotkeys.cancel()
@@ -213,6 +213,23 @@ MainWindow
     anchors.top: prev.bottom
     checked: false
     margin-top: 2
+
+  Label
+    id: pttLabel
+    !text: tr('Push-to-Talk:')
+    anchors.left: parent.left
+    anchors.top: useWith.bottom
+    margin-top: 15
+
+  Button
+    id: pttButton
+    !text: tr('Select Voip Hotkey')
+    width: 128
+    anchors.right: parent.right
+    anchors.top: pttLabel.top
+    margin-top: -4
+    margin-right: 15
+    @onClick: modules.game_hotkeys.startPttCapture()
 
   HorizontalSeparator
     id: separator

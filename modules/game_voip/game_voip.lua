@@ -35,6 +35,10 @@ local pttBinding = nil
 local pttPressed = false
 local checkPttEvent = nil
 
+-- Local Helper Connection
+local helperWs = nil
+local helperRetryEvent = nil
+
 -- Forward declaration
 local function checkPttState() end
 
@@ -78,6 +82,53 @@ function init()
   
   -- Check for PTT binding every second or on session join
   scheduleEvent(updatePttBinding, 1000)
+
+  -- Connect to Local VoIP Helper
+  connectToHelper()
+end
+
+function connectToHelper()
+  if helperWs then return end
+  
+  print(">> [VoIP] Connecting to local Helper (ws://localhost:3002)...")
+  local callbacks = {
+    onOpen = function()
+      print(">> [VoIP] Connected to local Helper.")
+      if helperRetryEvent then
+        removeEvent(helperRetryEvent)
+        helperRetryEvent = nil
+      end
+    end,
+    onMessage = function(data)
+      print(">> [VoIP] Received from Helper: " .. json.encode(data))
+    end,
+    onClose = function()
+      print(">> [VoIP] Local Helper disconnected.")
+      helperWs = nil
+      if not helperRetryEvent then
+        helperRetryEvent = scheduleEvent(connectToHelper, 5000)
+      end
+    end,
+    onError = function(err)
+      print(">> [VoIP] Local Helper error: " .. err)
+    end
+  }
+  
+  local ok, res = pcall(function() return HTTP.webSocketJSON("ws://localhost:3002", callbacks) end)
+  if ok then
+    helperWs = res
+  else
+    print(">> [VoIP] Failed to open WebSocket to Helper: " .. res)
+    if not helperRetryEvent then
+      helperRetryEvent = scheduleEvent(connectToHelper, 5000)
+    end
+  end
+end
+
+function sendToHelper(data)
+  if helperWs then
+    helperWs.send(data)
+  end
 end
 
 function terminate()
@@ -254,6 +305,13 @@ function onVoipSession(protocol, msg)
   if not voipUpdateEvent then
     voipUpdateEvent = scheduleEvent(updateBars, 500)
   end
+
+  -- Notify Helper about new session
+  sendToHelper({
+    type = 'CONNECT',
+    wsUrl = session.wsUrl,
+    sessionKey = session.sessionKey
+  })
 end
 
 function onVoipClose(protocol, msg)
@@ -315,7 +373,7 @@ function refreshMemberUI(name)
   local indicator = widget:getChildById('voiceIndicator')
 
   if isMuted then
-    indicator:setImageColor('#ff0000') -- Red for Muted
+    indicator:setBackgroundColor('#ff0000') -- Red for Muted
     indicator:setVisible(true)
   else
     -- Use the isSpeaking state from partyData (synced from server)
@@ -324,27 +382,39 @@ function refreshMemberUI(name)
       isSpeaking = pttPressed
     end
     
-    indicator:setImageColor('#00ff00') -- Green for Speaking
+    indicator:setBackgroundColor('#00ff00') -- Green for Speaking
     indicator:setVisible(isSpeaking)
   end
 end
 
 function updatePttBinding()
-  if not modules.game_hotkeys then return end
-  local hotkey = modules.game_hotkeys.getPttHotkey()
-  if hotkey == pttBinding then 
-    scheduleEvent(updatePttBinding, 2000)
+  if not g_game.isOnline() then
+    scheduleEvent(updatePttBinding, 1000)
+    return
+  end
+
+  local charName = g_game.getCharacterName()
+  local newBinding = g_settings.getString('voipPtt_' .. charName, '')
+  if newBinding == "None" or newBinding == "none" then
+    newBinding = ""
+  end
+
+  if newBinding == pttBinding then 
+    scheduleEvent(updatePttBinding, 500)
     return 
   end
 
   local root = modules.game_interface.getRootPanel()
-  if pttBinding then
-    g_keyboard.unbindKeyDown(pttBinding)
-    g_keyboard.unbindKeyUp(pttBinding)
-    disconnect(root, { onMousePress = onMousePTTKeyDown, onMouseRelease = onMousePTTKeyUp })
+  if pttBinding and pttBinding ~= "" then
+    if pttBinding:find("Mouse") then
+      disconnect(root, { onMousePress = onMousePTTKeyDown, onMouseRelease = onMousePTTKeyUp })
+    else
+      g_keyboard.unbindKeyDown(pttBinding, onPTTKeyDown)
+      g_keyboard.unbindKeyUp(pttBinding, onPTTKeyUp)
+    end
   end
 
-  pttBinding = hotkey
+  pttBinding = newBinding
   if pttBinding and pttBinding ~= "" then
     print("[VoIP] Binding PTT to: " .. pttBinding)
     if pttBinding:find("Mouse") then
@@ -355,17 +425,17 @@ function updatePttBinding()
     end
   end
   
-  scheduleEvent(updatePttBinding, 2000)
+  scheduleEvent(updatePttBinding, 500)
 end
 
 function getMouseButtonName(mouseButton)
   if mouseButton == MouseLeftButton then return "MouseLeft"
   elseif mouseButton == MouseRightButton then return "MouseRight"
-  elseif mouseButton == MouseMiddleButton then return "MouseMiddle"
+  elseif mouseButton == MouseMidButton then return "MouseMiddle"
   elseif mouseButton == MouseButton4 then return "Mouse4"
   elseif mouseButton == MouseButton5 then return "Mouse5"
   end
-  return ""
+  return "Mouse" .. tostring(mouseButton)
 end
 
 function onMousePTTKeyDown(self, mousePos, mouseButton)
@@ -384,16 +454,17 @@ end
 
 function onPTTKeyDown()
   if not g_game.isOnline() then return end
-  if pttPressed then return end
-  
   pttPressed = true
   print("[VoIP] PTT Key Down - Sending Opcode 201:1 (v2)")
+  
+  -- Notify Server (for visual indicator)
   local protocol = g_game.getProtocolGame()
   if protocol then
     protocol:sendExtendedOpcode(OPCODE_SPEAKING, "1")
-  else
-    print("[VoIP] Error: No protocol to send opcode 201")
   end
+  
+  -- Notify Local Helper (to start recording)
+  sendToHelper({ type = 'START_TALK' })
   
   local name = g_game.getCharacterName()
   refreshMemberUI(name)
@@ -401,16 +472,17 @@ end
 
 function onPTTKeyUp()
   if not g_game.isOnline() then return end
-  if not pttPressed then return end
-  
   pttPressed = false
   print("[VoIP] PTT Key Up - Sending Opcode 201:0 (v2)")
+  
+  -- Notify Server (for visual indicator)
   local protocol = g_game.getProtocolGame()
   if protocol then
     protocol:sendExtendedOpcode(OPCODE_SPEAKING, "0")
-  else
-    print("[VoIP] Error: No protocol to send opcode 201")
   end
+
+  -- Notify Local Helper (to stop recording)
+  sendToHelper({ type = 'STOP_TALK' })
   
   local name = g_game.getCharacterName()
   refreshMemberUI(name)
