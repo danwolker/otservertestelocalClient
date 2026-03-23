@@ -164,23 +164,6 @@ MainWindow
     margin-top: 2
     @onClick: modules.game_hotkeys.clearObject()
 
-  Label
-    id: pttLabel
-    !text: tr('Push-to-Talk:')
-    anchors.left: parent.left
-    anchors.top: prev.bottom
-    margin-top: 8
-
-  Button
-    id: pttButton
-    !text: tr('Assign PTT')
-    width: 128
-    anchors.left: selectObjectButton.left
-    anchors.right: selectObjectButton.right
-    anchors.top: pttLabel.top
-    margin-top: -4
-    @onClick: modules.game_hotkeys.assignPtt()
-
   ButtonBox
     id: useOnSelf
     !text: tr('Use on yourself')
@@ -218,7 +201,7 @@ MainWindow
     id: pttLabel
     !text: tr('Push-to-Talk:')
     anchors.left: parent.left
-    anchors.top: useWith.bottom
+    anchors.top: prev.bottom
     margin-top: 15
 
   Button

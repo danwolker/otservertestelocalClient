@@ -34,6 +34,7 @@ local mutedPlayers = {}
 local pttBinding = nil
 local pttPressed = false
 local checkPttEvent = nil
+local lastReportTime = 0
 
 -- Local Helper Connection
 local helperWs = nil
@@ -100,7 +101,23 @@ function connectToHelper()
       end
     end,
     onMessage = function(data)
-      print(">> [VoIP] Received from Helper: " .. json.encode(data))
+      if data.type == 'STATUS_UPDATE' then
+        local localName = g_game.getCharacterName()
+        for _, member in ipairs(data.members) do
+          local name = member.name
+          if name == 'LOCAL_USER' then name = localName end
+          
+          if partyData[name] then
+            partyData[name].latency = member.latency
+            partyData[name].status = member.status
+            refreshMemberUI(name)
+          end
+        end
+      elseif data.type == 'DEVICE_LIST' then
+        if modules.client_options and modules.client_options.updateDeviceList then
+          modules.client_options.updateDeviceList(data.devices)
+        end
+      end
     end,
     onClose = function()
       print(">> [VoIP] Local Helper disconnected.")
@@ -129,6 +146,40 @@ function sendToHelper(data)
   if helperWs then
     helperWs.send(data)
   end
+end
+
+function sendReport()
+  if not g_game.isOnline() then return end
+  
+  local now = os.time()
+  if now - lastReportTime < 600 then
+    local remaining = math.ceil((600 - (now - lastReportTime)) / 60)
+    modules.game_textmessage.displayFailureMessage(tr('Voce deve aguardar ' .. remaining .. ' minutos antes de realizar outro report.'))
+    return
+  end
+
+  local confirmBox
+  confirmBox = displayGeneralBox(tr('Report Party'), tr('Deseja reportar o audio desta party? Um "Instant Replay" dos ultimos 90 segundos sera gerado para moderacao.\n(Voce podera realizar outro report em 10 minutos)'), {
+    { text = tr('Confirmar'), callback = function()
+        print("[VoIP] Sending General Report Request")
+        sendToHelper({ type = 'REPORT_GENERAL' })
+        g_game.getProtocolGame():sendExtendedOpcode(OPCODE_SPEAKING, "REPORT")
+        
+        lastReportTime = os.time()
+        modules.game_textmessage.displayStatusMessage(tr('Denuncia enviada com sucesso. O replay da party sera analisado.'))
+        
+        if confirmBox then
+          confirmBox:destroy()
+          confirmBox = nil
+        end
+    end },
+    { text = tr('Cancelar'), callback = function() 
+        if confirmBox then
+          confirmBox:destroy() 
+          confirmBox = nil
+        end
+    end }
+  })
 end
 
 function terminate()
@@ -234,7 +285,15 @@ function onVoipUpdate(protocol, opcode, buffer)
         addons = tonumber(outfitparts[6]) or 0,
       }
 
-      partyData[name] = { id = id, vocID = vocID, outfit = outfit, isLeader = isLeader, isSpeaking = isSpeaking }
+      partyData[name] = { 
+        id = id, 
+        vocID = vocID, 
+        outfit = outfit, 
+        isLeader = isLeader, 
+        isSpeaking = isSpeaking,
+        latency = 0,
+        status = 'offline'
+      }
       
       addMember(name, vocName, isLeader, outfit, healthPercent, manaPercent)
       currentMembers[name] = true
@@ -371,6 +430,23 @@ function refreshMemberUI(name)
   local vocMuteId = VOCATION_MUTE_ID[data.vocID] or "All"
   local isMuted = mutedVocations["All"] or mutedVocations[vocMuteId] or mutedPlayers[name]
   local indicator = widget:getChildById('voiceIndicator')
+
+  local status = data.status or 'offline'
+  local latency = data.latency or 0
+  local qualityWidget = widget:getChildById('connectionQuality')
+
+  -- Update Connection Quality Color
+  if status == 'online' then
+    if latency < 150 then
+      qualityWidget:setBackgroundColor('#00ff00') -- Green (Stable)
+    elseif latency < 400 then
+      qualityWidget:setBackgroundColor('#ffa500') -- Orange (Unstable)
+    else
+      qualityWidget:setBackgroundColor('#ff4500') -- Dark Orange/Weak
+    end
+  else
+    qualityWidget:setBackgroundColor('#ff0000') -- Red (Disconnected)
+  end
 
   if isMuted then
     indicator:setBackgroundColor('#ff0000') -- Red for Muted
@@ -617,6 +693,13 @@ function onMemberClick(widget, mousePos, mouseButton)
     menu:addOption('Copiar Nome', function() 
       g_window.setClipboardText(name) 
     end)
+
+    menu:addSeparator()
+
+    -- REPORT
+    menu:addOption('Reportar ' .. name, function() 
+      reportMember(name)
+    end)
     
     print("[VoIP] Displaying menu for " .. name)
     menu:display(mousePos)
@@ -624,7 +707,55 @@ function onMemberClick(widget, mousePos, mouseButton)
   end
 end
 
+function reportMember(name)
+  local data = partyData[name]
+  if not data then return end
+
+  local now = os.time()
+  if now - lastReportTime < 600 then
+    local remaining = math.ceil((600 - (now - lastReportTime)) / 60)
+    modules.game_textmessage.displayFailureMessage(tr('Voce deve aguardar ' .. remaining .. ' minutos antes de realizar outro report.'))
+    return
+  end
+
+  local confirmBox
+  confirmBox = displayGeneralBox(tr('Report Player'), tr('Deseja reportar ' .. name .. '? O audio da party (incluindo este jogador) sera gravado para analise.\n(Voce podera realizar outro report em 10 minutos)'), {
+    { text = tr('Confirmar'), callback = function()
+        print("[VoIP] Sending Report for: " .. name .. " (ID: " .. tostring(data.id) .. ")")
+        sendToHelper({ 
+          type = 'REPORT', 
+          targetId = data.id, 
+          targetName = name 
+        })
+        -- Also notify game server if needed
+        g_game.getProtocolGame():sendExtendedOpcode(OPCODE_SPEAKING, "REPORT:" .. tostring(data.id))
+        
+        lastReportTime = os.time()
+        modules.game_textmessage.displayStatusMessage(tr('O jogador ' .. name .. ' foi reportado com sucesso.'))
+        
+        if confirmBox then
+          confirmBox:destroy()
+          confirmBox = nil
+        end
+    end },
+    { text = tr('Cancelar'), callback = function() 
+        if confirmBox then
+          confirmBox:destroy() 
+          confirmBox = nil
+        end
+    end }
+  })
+end
+
 function togglePlayerMute(name)
   mutedPlayers[name] = not mutedPlayers[name]
   refreshMemberUI(name)
+end
+
+function getDevices()
+  sendToHelper({ type = 'LIST_DEVICES' })
+end
+
+function setDevice(deviceId)
+  sendToHelper({ type = 'SET_DEVICE', deviceId = deviceId })
 end

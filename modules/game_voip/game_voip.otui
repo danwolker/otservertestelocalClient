@@ -96,14 +96,24 @@ VoipMember < Panel
 
   UIWidget
     id: voiceIndicator
-    anchors.right: vocation.left
+    anchors.right: parent.right
     anchors.top: parent.top
     size: 12 12
-    margin-right: 4
+    margin-right: 5
     margin-top: 2
     image-source: /images/topbuttons/audio
     image-color: #00ff00
     visible: false
+    phantom: true
+
+  UIWidget
+    id: connectionQuality
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    size: 12 4
+    margin-right: 5
+    margin-bottom: 2
+    background-color: #ff0000 -- Red initially
     phantom: true
 
 MiniWindow
@@ -167,6 +177,18 @@ MiniWindow
         @onClick: modules.game_voip.onMuteClick(self)
         $checked:
           background-color: #993333
+
+    Button
+      id: reportButton
+      !text: tr('REP')
+      !tooltip: tr('Report Party (Instant Replay)')
+      size: 28 18
+      background-color: #773333
+      border: 1 #ff6666
+      color: #ffffff
+      font: verdana-11px-monochrome
+      margin-left: 10
+      @onClick: modules.game_voip.sendReport()
 
     HorizontalSeparator
       anchors.top: prev.bottom

@@ -24,6 +24,9 @@ const {
 const LOCAL_PORT = 3002;
 let localWs = null;
 let mainVoipWs = null;
+let lastPingTime = 0;
+let currentLatency = 0;
+let statusInterval = null;
 
 const opus = new OpusScript(SAMPLE_RATE, CHANNELS, OpusScript.Application.VOIP);
 
@@ -100,31 +103,21 @@ function stopCapture() {
 // 3. Captura de Microfone
 // ────────────────────────────────────────
 function startMic() {
-    const state = _getState();
-    state.isTalking = true;
-    console.log('>> [VoIP Helper] Microfone ativado.');
-
-    micStream = record.record({
-        sampleRate: SAMPLE_RATE,
-        threshold: 0,
-        verbose: false,
-    }).stream();
-
-    micStream.on('data', (chunk) => {
-        sendPcmChunk(chunk, mainVoipWs, opus, WebSocket.OPEN);
-    });
-
-    micStream.on('error', (e) => {
-        console.error('>> [VoIP Helper] Erro no microfone:', e);
-    });
+    console.log('>> [VoIP Helper] Iniciando captura de Microfone (naudiodon)...');
+    startMicAudio(
+        (chunk) => sendPcmChunk(chunk, mainVoipWs, opus, WebSocket.OPEN),
+        (e) => console.error('>> [VoIP Helper] Erro no microfone:', e)
+    );
 }
 
 function stopMic() {
-    if (micStream) {
+    const state = _getState();
+    if (state.micAudioInput) {
         console.log('>> [VoIP Helper] Microfone desativado.');
-        micStream.destroy();
-        micStream = null;
+        try { state.micAudioInput.quit(); } catch (_) {}
+        state.micAudioInput = null;
     }
+    state.isTalking = false;
 }
 
 // ────────────────────────────────────────
@@ -154,13 +147,43 @@ function connectToMainVoip(url, sessionKey) {
         if (Buffer.isBuffer(data)) {
             handleIncomingAudio(data);
         } else {
-            if (localWs) localWs.send(data);
+            const msg = JSON.parse(data.toString());
+            if (msg.type === 'pong') {
+                currentLatency = Date.now() - lastPingTime;
+            } else if (localWs) {
+                localWs.send(data.toString());
+            }
         }
     });
 
     mainVoipWs.on('close', (code) => {
         console.log(`>> [VoIP Helper] Desconectado do Servidor Principal. Código: ${code}`);
+        if (statusInterval) clearInterval(statusInterval);
     });
+
+    // Start Ping and Status reporting
+    if (statusInterval) clearInterval(statusInterval);
+    statusInterval = setInterval(() => {
+        if (mainVoipWs && mainVoipWs.readyState === WebSocket.OPEN) {
+            lastPingTime = Date.now();
+            mainVoipWs.send(JSON.stringify({ type: 'ping' }));
+        }
+
+        // Send update to OTClient
+        if (localWs) {
+            const state = _getState();
+            localWs.send(JSON.stringify({
+                type: 'STATUS_UPDATE',
+                members: [
+                    { 
+                        name: 'LOCAL_USER', // OTClient will handle mapping to current character
+                        latency: currentLatency, 
+                        status: (mainVoipWs && mainVoipWs.readyState === WebSocket.OPEN) ? 'online' : 'offline'
+                    }
+                ]
+            }));
+        }
+    }, 2000);
 
     mainVoipWs.on('error', (e) => {
         console.error('>> [VoIP Helper] Erro na conexão com o Servidor Principal:', e.message);

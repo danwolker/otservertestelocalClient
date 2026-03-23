@@ -141,6 +141,44 @@ function sendPcmChunk(chunk, ws, opus, wsOpen) {
 }
 
 // ────────────────────────────────────────
+// startMicAudio
+// ────────────────────────────────────────
+/**
+ * Inicia captura de microfone via naudiodon.
+ * @param {Function} onChunk - Callback para chunks PCM
+ * @param {Function} onError - Callback para erros
+ */
+function startMicAudio(onChunk, onError) {
+    const options = {
+        inOptions: {
+            channelCount: CHANNELS,
+            sampleFormat: naudiodon.SampleFormat16Bit,
+            sampleRate: SAMPLE_RATE,
+            // deviceId: null usa o default
+            closeOnError: false,
+        }
+    };
+
+    let audioInput;
+    try {
+        audioInput = new naudiodon.AudioIO(options);
+    } catch (e) {
+        if (onError) onError(e);
+        return null;
+    }
+
+    audioInput.on('data', onChunk);
+    audioInput.on('error', (e) => { if (onError) onError(e); });
+    audioInput.start();
+
+    _state.isTalking = true;
+    _state.micAudioInput = audioInput;
+    _state.pcmBuffer = Buffer.alloc(0);
+
+    return audioInput;
+}
+
+// ────────────────────────────────────────
 // startSystemAudio
 // ────────────────────────────────────────
 /**
@@ -235,6 +273,7 @@ module.exports = {
     listAudioDevices,
     sendPcmChunk,
     startSystemAudio,
+    startMicAudio,
     handleClientCommand,
 
     // Constantes

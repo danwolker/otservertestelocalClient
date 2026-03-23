@@ -34,3 +34,15 @@ OptionPanel
     margin-top: 3
     minimum: 0
     maximum: 100
+
+  Label
+    id: microphoneLabel
+    !text: tr('Microphone:')
+    margin-top: 10
+
+  ComboBox
+    id: microphone
+    margin-top: 3
+    margin-right: 2
+    margin-left: 2
+    @onOptionChange: modules.client_options.setMicrophone(self:getText(), self:getCurrentOption().data)

@@ -193,6 +193,10 @@ function show()
   optionsWindow:show()
   optionsWindow:raise()
   optionsWindow:focus()
+  
+  if modules.game_voip then
+    modules.game_voip.getDevices()
+  end
 end
 
 function hide()
@@ -428,4 +432,26 @@ function setLightOptionsVisibility(value)
   interfacePanel:getChildById('floorFading'):setEnabled(value)
   interfacePanel:getChildById('floorFadingLabel'):setEnabled(value)
   interfacePanel:getChildById('floorFadingLabel2'):setEnabled(value)  
+end
+
+function updateDeviceList(devices)
+  if not audioPanel then return end
+  local microphoneCombo = audioPanel:getChildById('microphone')
+  if not microphoneCombo then return end
+
+  local currentText = microphoneCombo:getText()
+  microphoneCombo:clearOptions()
+  for _, device in ipairs(devices) do
+    microphoneCombo:addOption(device.name, device.id)
+  end
+  
+  if currentText ~= "" then
+    microphoneCombo:setCurrentOption(currentText, true)
+  end
+end
+
+function setMicrophone(name, deviceId)
+  if modules.game_voip then
+    modules.game_voip.setDevice(deviceId)
+  end
 end
