@@ -35,13 +35,13 @@ public class AudioPlay {
     public static extern uint waveOutOpen(out IntPtr phwo, int uDeviceID, ref WAVEFORMATEX lpFormat, IntPtr dwCallback, IntPtr dwInstance, uint fdwOpen);
 
     [DllImport("winmm.dll", SetLastError = true)]
-    public static extern uint waveOutPrepareHeader(IntPtr hwo, ref WAVEHDR pwh, uint cbwh);
+    public static extern uint waveOutPrepareHeader(IntPtr hwo, IntPtr pwh, uint cbwh);
 
     [DllImport("winmm.dll", SetLastError = true)]
-    public static extern uint waveOutWrite(IntPtr hwo, ref WAVEHDR pwh, uint cbwh);
+    public static extern uint waveOutWrite(IntPtr hwo, IntPtr pwh, uint cbwh);
 
     [DllImport("winmm.dll", SetLastError = true)]
-    public static extern uint waveOutUnprepareHeader(IntPtr hwo, ref WAVEHDR pwh, uint cbwh);
+    public static extern uint waveOutUnprepareHeader(IntPtr hwo, IntPtr pwh, uint cbwh);
 
     [DllImport("winmm.dll", SetLastError = true)]
     public static extern uint waveOutClose(IntPtr hwo);
@@ -64,17 +64,30 @@ public class AudioPlay {
             return;
         }
 
+        int BUFFER_COUNT = 3;
+        IntPtr[] buffers = new IntPtr[BUFFER_COUNT];
+        IntPtr[] headerPtrs = new IntPtr[BUFFER_COUNT];
+
+        for (int i = 0; i < BUFFER_COUNT; i++) {
+            buffers[i] = Marshal.AllocHGlobal(1920);
+            headerPtrs[i] = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(WAVEHDR)));
+            WAVEHDR h = new WAVEHDR();
+            h.lpData = buffers[i];
+            h.dwBufferLength = 1920;
+            h.dwFlags = 1; // Start as WHDR_DONE so it's immediately available
+            Marshal.StructureToPtr(h, headerPtrs[i], false);
+        }
+
         Stream stdin = Console.OpenStandardInput();
         byte[] buffer = new byte[1920]; // 20ms chunks
 
         while (true) {
             int bytesRead = 0;
             try {
-                // Read EXACTLY a full chunk if possible
                 int offset = 0;
                 while (offset < buffer.Length) {
                     int read = stdin.Read(buffer, offset, buffer.Length - offset);
-                    if (read == 0) break; // EOF
+                    if (read == 0) break;
                     offset += read;
                 }
                 bytesRead = offset;
@@ -84,26 +97,41 @@ public class AudioPlay {
 
             if (bytesRead == 0) break;
 
-            IntPtr unmanagedPointer = Marshal.AllocHGlobal(bytesRead);
-            Marshal.Copy(buffer, 0, unmanagedPointer, bytesRead);
-
-            WAVEHDR header = new WAVEHDR();
-            header.lpData = unmanagedPointer;
-            header.dwBufferLength = (uint)bytesRead;
-            header.dwFlags = 0;
-
-            waveOutPrepareHeader(hWaveOut, ref header, (uint)Marshal.SizeOf(typeof(WAVEHDR)));
-            waveOutWrite(hWaveOut, ref header, (uint)Marshal.SizeOf(typeof(WAVEHDR)));
-
-            // Let it play (dirty polling, but works for streaming)
-            while ((header.dwFlags & 1) == 0) { // WHDR_DONE = 1
-                Thread.Sleep(1);
+            int idx = -1;
+            WAVEHDR currentHdr = new WAVEHDR();
+            while (idx == -1) {
+                for (int i = 0; i < BUFFER_COUNT; i++) {
+                    currentHdr = (WAVEHDR)Marshal.PtrToStructure(headerPtrs[i], typeof(WAVEHDR));
+                    if ((currentHdr.dwFlags & 1) == 1) { // WHDR_DONE
+                        idx = i;
+                        break;
+                    }
+                }
+                if (idx == -1) Thread.Sleep(1);
             }
 
-            waveOutUnprepareHeader(hWaveOut, ref header, (uint)Marshal.SizeOf(typeof(WAVEHDR)));
-            Marshal.FreeHGlobal(unmanagedPointer);
+            if ((currentHdr.dwFlags & 2) != 0) { // WHDR_PREPARED
+                waveOutUnprepareHeader(hWaveOut, headerPtrs[idx], (uint)Marshal.SizeOf(typeof(WAVEHDR)));
+            }
+
+            Marshal.Copy(buffer, 0, currentHdr.lpData, bytesRead);
+            currentHdr.dwBufferLength = (uint)bytesRead;
+            currentHdr.dwFlags = 0;
+            Marshal.StructureToPtr(currentHdr, headerPtrs[idx], false);
+
+            waveOutPrepareHeader(hWaveOut, headerPtrs[idx], (uint)Marshal.SizeOf(typeof(WAVEHDR)));
+            waveOutWrite(hWaveOut, headerPtrs[idx], (uint)Marshal.SizeOf(typeof(WAVEHDR)));
         }
 
+        // Cleanup
+        for (int i = 0; i < BUFFER_COUNT; i++) {
+            WAVEHDR h = (WAVEHDR)Marshal.PtrToStructure(headerPtrs[i], typeof(WAVEHDR));
+            if ((h.dwFlags & 2) != 0) {
+                waveOutUnprepareHeader(hWaveOut, headerPtrs[i], (uint)Marshal.SizeOf(typeof(WAVEHDR)));
+            }
+            Marshal.FreeHGlobal(buffers[i]);
+            Marshal.FreeHGlobal(headerPtrs[i]);
+        }
         waveOutClose(hWaveOut);
     }
 }
