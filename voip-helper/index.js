@@ -23,7 +23,7 @@ const {
 // Configurações Locais
 // ────────────────────────────────────────
 const LOCAL_PORT = 3002;
-const opus = new OpusEncoder(SAMPLE_RATE, CHANNELS);
+// Remover opus global para evitar corrupção de estado entre encode/decode
 
 // ────────────────────────────────────────
 // 1. Servidor WebSocket local → OTClient
@@ -42,7 +42,9 @@ wss.on('connection', (ws) => {
         testAudioInput: null,
         currentLatency: 0,
         lastPingTime: 0,
-        statusInterval: null
+        statusInterval: null,
+        captureEncoder: new OpusEncoder(SAMPLE_RATE, CHANNELS),
+        decoders: new Map() // playerId -> OpusEncoder
     };
 
     ws.on('message', (message) => {
@@ -103,7 +105,7 @@ function startCapture(ctx) {
 
     if (state.captureMode === 'system') {
         startSystemAudio(
-            (chunk) => sendPcmChunk(chunk, ctx.mainVoipWs, opus, WebSocket.OPEN),
+            (chunk) => sendPcmChunk(chunk, ctx.mainVoipWs, ctx.captureEncoder, WebSocket.OPEN),
             (e) => console.error('>> [VoIP Helper] Erro na captura de sistema:', e)
         );
     } else {
@@ -127,7 +129,7 @@ function stopCapture(ctx) {
 function startMic(ctx) {
     console.log('>> [VoIP Helper] Iniciando captura de Microfone (PowerShell)...');
     startMicAudio(
-        (chunk) => sendPcmChunk(chunk, ctx.mainVoipWs, opus, WebSocket.OPEN),
+        (chunk) => sendPcmChunk(chunk, ctx.mainVoipWs, ctx.captureEncoder, WebSocket.OPEN),
         (e) => console.error('>> [VoIP Helper] Erro no microfone:', e)
     );
 }
@@ -178,6 +180,7 @@ function startAudioTest(ctx) {
         (e) => console.error('>> [VoIP Helper] Erro no teste de áudio:', e)
     );
 }
+// Nota: O teste usa PCM direto no Speaker, sem passar pelo Opus.
 
 function stopAudioTest(ctx) {
     console.log('>> [VoIP Helper] Parando Teste de Áudio.');
@@ -204,8 +207,8 @@ function connectToMainVoip(ctx, url, sessionKey) {
         ctx.mainVoipWs.send(JSON.stringify({ type: 'auth', sessionKey }));
     });
 
-    ctx.mainVoipWs.on('message', (data) => {
-        if (Buffer.isBuffer(data)) {
+    ctx.mainVoipWs.on('message', (data, isBinary) => {
+        if (isBinary) {
             handleIncomingAudio(ctx, data);
         } else {
             try {
@@ -270,10 +273,29 @@ function startStatusHeartbeat(ctx) {
 // ────────────────────────────────────────
 // 6. Reprodução de Áudio Recebido
 // ────────────────────────────────────────
-function handleIncomingAudio(ctx, encodedBuffer) {
+function handleIncomingAudio(ctx, rawData) {
     try {
         if (!ctx.speaker) ctx.speaker = startPlayback();
-        const decoded = opus.decode(encodedBuffer);
+        
+        if (rawData.length < 8) return;
+        
+        const hex = rawData.slice(0, 8).toString('hex');
+        const playerId = rawData.readUInt32LE(0);
+        const encodedBuffer = rawData.slice(4);
+
+        if (!ctx.lastAudioLog || Date.now() - ctx.lastAudioLog > 3000) {
+            console.log(`>> [VoIP Helper] Audio received: [Hex: ${hex}] [PlayerID: ${playerId}] [Size: ${rawData.length}]`);
+            ctx.lastAudioLog = Date.now();
+        }
+
+        let decoder = ctx.decoders.get(playerId);
+        if (!decoder) {
+            console.log(`>> [VoIP Helper] Criando novo Decoder para player ID: ${playerId}`);
+            decoder = new OpusEncoder(SAMPLE_RATE, CHANNELS);
+            ctx.decoders.set(playerId, decoder);
+        }
+
+        const decoded = decoder.decode(encodedBuffer);
         ctx.speaker.write(decoded);
     } catch (e) {
         console.error('>> [VoIP Helper] Erro ao decodificar áudio:', e);
