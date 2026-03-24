@@ -67,7 +67,8 @@ local defaultOptions = {
   profile = 1,
   
   antialiasing = true,
-  autoExit = false
+  autoExit = false,
+  micSensitivity = 10
 }
 
 local optionsWindow
@@ -362,6 +363,11 @@ function setOption(key, value, force)
     generalPanel:getChildById('walkCtrlTurnDelayLabel'):setText(tr('Walk delay after ctrl turn: %s ms', value))  
   elseif key == "antialiasing" then
     g_app.setSmooth(value)
+  elseif key == "micSensitivity" then
+    audioPanel:getChildById('micSensitivityLabel'):setText(tr('Mic Sensitivity: %d%%', value))
+    if modules.game_voip then
+      modules.game_voip.setSensitivity(value)
+    end
   end
 
   -- change value for keybind updates

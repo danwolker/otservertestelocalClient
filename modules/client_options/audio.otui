@@ -59,6 +59,21 @@ OptionPanel
     margin-left: 2
     @onOptionChange: modules.client_options.setSpeaker(self:getText(), self:getCurrentOption().data)
 
+  Label
+    id: micSensitivityLabel
+    !text: tr('Mic Sensitivity: %d%%', 10)
+    margin-top: 10
+    @onSetup: |
+      local value = modules.client_options.getOption('micSensitivity')
+      self:setText(tr('Mic Sensitivity: %d%%', value))
+
+  OptionScrollbar
+    id: micSensitivity
+    margin-top: 3
+    minimum: 0
+    maximum: 100
+    @onValueChange: modules.client_options.setOption('micSensitivity', self:getValue())
+
   Button
     id: testAudio
     !text: tr('Test Microphone')

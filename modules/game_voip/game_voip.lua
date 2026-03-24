@@ -88,6 +88,9 @@ function init()
   
   -- Check for PTT binding every second or on session join
   scheduleEvent(updatePttBinding, 1000)
+  
+  -- Start heartbeat to local helper
+  sendPingToHelper()
 
   -- Connect to Local VoIP Helper
   connectToHelper()
@@ -184,7 +187,7 @@ function sendToHelper(data)
     if ok then
       local sendOk, err = pcall(function() return helperWs.send(encoded) end)
       if not sendOk then
-        print(">> [VoIP] Error sending to Helper: " .. tostring(err))
+        -- print(">> [VoIP] Error sending to Helper: " .. tostring(err))
       end
     else
       print(">> [VoIP] Error encoding JSON for Helper: " .. tostring(encoded))
@@ -192,6 +195,13 @@ function sendToHelper(data)
   else
     print(">> [VoIP] Error: Cannot send to Helper (Socket not connected)")
   end
+end
+
+function sendPingToHelper()
+  if helperWs then
+    sendToHelper({ type = 'ping' })
+  end
+  scheduleEvent(sendPingToHelper, 5000)
 end
 
 function sendReport()
@@ -412,6 +422,7 @@ function onVoipSession(protocol, msg)
   end
 
   -- Notify Helper about new session
+  print(">> [VoIP] Session Join: " .. session.wsUrl .. " | Room: " .. session.roomId)
   sendToHelper({
     type = 'CONNECT',
     wsUrl = session.wsUrl,
@@ -608,6 +619,10 @@ function onPTTKeyUp()
   
   local name = g_game.getCharacterName()
   refreshMemberUI(name)
+end
+
+function setSensitivity(value)
+  sendToHelper({ type = 'SET_SENSITIVITY', value = value })
 end
 
 function checkPttState()

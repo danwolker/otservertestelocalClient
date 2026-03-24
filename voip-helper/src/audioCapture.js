@@ -24,6 +24,7 @@ let _state = {
     micAudioInput: null,
     pcmBuffer: Buffer.alloc(0),
     voiceLevel: 0,
+    sensitivity: 10,
 };
 
 function calculateVolume(buffer) {
@@ -121,8 +122,14 @@ function sendPcmChunk(chunk, ws, opus, wsOpen) {
             const encoded = opus.encode(frame);
             ws.send(encoded);
             framesSent++;
+            
+            // Log transmission once every 2 seconds to confirm it's working
+            if (!_state.lastSendLogTime || Date.now() - _state.lastSendLogTime > 2000) {
+                console.log(`>> [VoIP Helper] Opus frame sent to main server (${encoded.length} bytes)`);
+                _state.lastSendLogTime = Date.now();
+            }
         } catch (e) {
-            // erro de encoding: descarta frame
+            console.error('>> [VoIP Helper] Opus encoding error:', e);
         }
     }
 
@@ -161,12 +168,17 @@ function startMicAudio(onChunk, onError) {
             
             this.process.stdout.on('data', (data) => {
                 _state.voiceLevel = calculateVolume(data);
+                
                 // Debug log to confirm data is coming in (max once per second to avoid spam)
                 if (!_state.lastLogTime || Date.now() - _state.lastLogTime > 1000) {
-                    console.log(`>> [VoIP Helper] Audio chunk received: ${data.length} bytes (Level: ${_state.voiceLevel})`);
+                    console.log(`>> [VoIP Helper] Audio chunk received: ${data.length} bytes (Level: ${_state.voiceLevel}, Gate: ${_state.sensitivity})`);
                     _state.lastLogTime = Date.now();
                 }
-                if (this.onData) this.onData(data);
+
+                // Noise Gate: only pass data if it's above sensitivity
+                if (_state.voiceLevel >= _state.sensitivity) {
+                    if (this.onData) this.onData(data);
+                }
             });
             
             this.process.stderr.on('data', (data) => {
@@ -339,6 +351,16 @@ function handleClientCommand(data, handlers) {
         case 'TEST_STOP':
             if (handlers.testStop) handlers.testStop();
             return 'TEST_STOP';
+        case 'SET_SENSITIVITY':
+            console.log(`>> [VoIP Helper] SET_SENSITIVITY received: ${data.value}`);
+            _state.sensitivity = parseInt(data.value) || 0;
+            return 'SET_SENSITIVITY';
+        case 'REPORT':
+            console.log(`>> [VoIP Helper] REPORT received for: ${data.targetName} (${data.targetId})`);
+            return 'REPORT';
+        case 'REPORT_GENERAL':
+            console.log(`>> [VoIP Helper] REPORT_GENERAL received.`);
+            return 'REPORT_GENERAL';
         default:
             return null;
     }
