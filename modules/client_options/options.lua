@@ -116,6 +116,12 @@ function init()
   optionsTabBar:addTab(tr('Graphics'), graphicsPanel, '/images/optionstab/graphics')
 
   audioPanel = g_ui.loadUI('audio')
+  local voiceActivity = audioPanel:getChildById('voiceActivity')
+  if voiceActivity then
+    voiceActivity:setMinimum(0)
+    voiceActivity:setMaximum(100)
+    voiceActivity:setValue(0)
+  end
   optionsTabBar:addTab(tr('Audio'), audioPanel, '/images/optionstab/audio')
 
 
@@ -196,6 +202,7 @@ function show()
   
   if modules.game_voip then
     modules.game_voip.getDevices()
+    modules.game_voip.getDevicesOut()
   end
 end
 
@@ -435,9 +442,16 @@ function setLightOptionsVisibility(value)
 end
 
 function updateDeviceList(devices)
-  if not audioPanel then return end
+  print(">> [VoIP] Options: updateDeviceList called with " .. #devices .. " devices")
+  if not audioPanel then 
+    print(">> [VoIP] Options: Error - audioPanel is nil")
+    return 
+  end
   local microphoneCombo = audioPanel:getChildById('microphone')
-  if not microphoneCombo then return end
+  if not microphoneCombo then 
+    print(">> [VoIP] Options: Error - microphone ComboBox not found")
+    return 
+  end
 
   local currentText = microphoneCombo:getText()
   microphoneCombo:clearOptions()
@@ -453,5 +467,60 @@ end
 function setMicrophone(name, deviceId)
   if modules.game_voip then
     modules.game_voip.setDevice(deviceId)
+  end
+end
+
+function updateSpeakerList(devices)
+  if not audioPanel then return end
+  local speakerCombo = audioPanel:getChildById('speaker')
+  if not speakerCombo then return end
+
+  local currentText = speakerCombo:getText()
+  speakerCombo:clearOptions()
+  for _, device in ipairs(devices) do
+    speakerCombo:addOption(device.name, device.id)
+  end
+  
+  if currentText ~= "" then
+    speakerCombo:setCurrentOption(currentText, true)
+  end
+end
+
+function setSpeaker(name, deviceId)
+  if modules.game_voip then
+    modules.game_voip.setDeviceOut(deviceId)
+  end
+end
+
+local isTestingAudio = false
+function testAudio()
+  if not modules.game_voip then return end
+  
+  isTestingAudio = not isTestingAudio
+  local testButton = audioPanel:getChildById('testAudio')
+  local voiceActivity = audioPanel:getChildById('voiceActivity')
+  local voiceActivityLabel = audioPanel:getChildById('voiceActivityLabel')
+  
+  if isTestingAudio then
+    testButton:setText(tr('Stop Test'))
+    voiceActivity:setVisible(true)
+    voiceActivityLabel:setVisible(true)
+    print(">> [VoIP] Starting Audio Test...")
+    modules.game_voip.startTest()
+  else
+    testButton:setText(tr('Test Microphone'))
+    voiceActivity:setVisible(false)
+    voiceActivityLabel:setVisible(false)
+    voiceActivity:setValue(0)
+    print(">> [VoIP] Stopping Audio Test.")
+    modules.game_voip.stopTest()
+  end
+end
+
+function updateVoiceActivity(level)
+  if not audioPanel or not isTestingAudio then return end
+  local voiceActivity = audioPanel:getChildById('voiceActivity')
+  if voiceActivity then
+    voiceActivity:setValue(level)
   end
 end

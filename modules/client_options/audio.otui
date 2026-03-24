@@ -46,3 +46,43 @@ OptionPanel
     margin-right: 2
     margin-left: 2
     @onOptionChange: modules.client_options.setMicrophone(self:getText(), self:getCurrentOption().data)
+
+  Label
+    id: speakerLabel
+    !text: tr('Speaker:')
+    margin-top: 10
+
+  ComboBox
+    id: speaker
+    margin-top: 3
+    margin-right: 2
+    margin-left: 2
+    @onOptionChange: modules.client_options.setSpeaker(self:getText(), self:getCurrentOption().data)
+
+  Button
+    id: testAudio
+    !text: tr('Test Microphone')
+    margin-top: 15
+    margin-right: 40
+    margin-left: 40
+    @onClick: modules.client_options.testAudio()
+
+  Label
+    id: voiceActivityLabel
+    !text: tr('Voice Activity:')
+    margin-top: 10
+    visible: false
+
+  ProgressBar
+    id: voiceActivity
+    margin-top: 3
+    margin-right: 10
+    margin-left: 10
+    height: 15
+    background-color: #555555
+    image-source: /images/ui/progressbar
+    image-color: #00FF00
+    visible: false
+    minimum: 0
+    maximum: 100
+    value: 0

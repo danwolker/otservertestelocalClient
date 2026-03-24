@@ -145,6 +145,7 @@ encode = function(val, state)
   if f then
     return f(val, state)
   end
+  print(">> [JSON] Encoding unexpected value of type: " .. t .. " (val: " .. tostring(val) .. ")")
   error("unexpected type '" .. t .. "'")
 end
 

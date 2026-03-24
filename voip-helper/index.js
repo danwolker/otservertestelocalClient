@@ -1,9 +1,7 @@
 'use strict';
 
 const WebSocket = require('ws');
-const record = require('node-record-lpcm16');
-const OpusScript = require('opusscript');
-const Speaker = require('speaker');
+const { OpusEncoder } = require('@discordjs/opus');
 
 const {
     setCaptureMode,
@@ -11,7 +9,10 @@ const {
     listAudioDevices,
     sendPcmChunk,
     startSystemAudio,
+    startMicAudio,
+    startPlayback,
     handleClientCommand,
+    listAudioOutputDevices,
     SAMPLE_RATE,
     CHANNELS,
     FRAME_SIZE,
@@ -28,21 +29,18 @@ let lastPingTime = 0;
 let currentLatency = 0;
 let statusInterval = null;
 
-const opus = new OpusScript(SAMPLE_RATE, CHANNELS, OpusScript.Application.VOIP);
+const opus = new OpusEncoder(SAMPLE_RATE, CHANNELS);
 
 // ────────────────────────────────────────
-// Speaker (reprodução de áudio recebido)
+// Speaker (reprodução de áudio recebido via naudiodon)
 // ────────────────────────────────────────
-const speaker = new Speaker({
-    channels: CHANNELS,
-    bitDepth: 16,
-    sampleRate: SAMPLE_RATE,
-});
+let speaker = null;
+let testAudioInput = null;
 
 // ────────────────────────────────────────
 // 1. Servidor WebSocket local → OTClient
 // ────────────────────────────────────────
-const wss = new WebSocket.Server({ port: LOCAL_PORT });
+const wss = new WebSocket.Server({ host: '127.0.0.1', port: LOCAL_PORT });
 console.log(`>> [VoIP Helper] Escutando OTClient em ws://localhost:${LOCAL_PORT}`);
 
 wss.on('connection', (ws) => {
@@ -52,11 +50,22 @@ wss.on('connection', (ws) => {
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
+            console.log(`>> [VoIP Helper] Comando recebido: ${data.type}`);
             handleClientCommand(data, {
                 connect:      (url, key) => connectToMainVoip(url, key),
                 startCapture: () => startCapture(),
                 stopCapture:  () => stopCapture(),
-                listDevices:  () => sendDeviceList(),
+                listDevices:  async () => await sendDeviceList(),
+                listDevicesOut: async () => await sendDeviceListOut(),
+                setDeviceOut: (deviceId) => {
+                    console.log(`>> [VoIP Helper] Selecionando Speaker ID: ${deviceId}`);
+                    if (speaker) {
+                        speaker.end();
+                        speaker = null;
+                    }
+                },
+                testStart:    () => startAudioTest(),
+                testStop:     () => stopAudioTest(),
             });
         } catch (e) {
             console.error('>> [VoIP Helper] Erro ao processar comando do Client:', e);
@@ -67,13 +76,18 @@ wss.on('connection', (ws) => {
         console.log('>> [VoIP Helper] OTClient desconectado.');
         stopCapture();
         if (mainVoipWs) mainVoipWs.close();
+        if (statusInterval) {
+            clearInterval(statusInterval);
+            statusInterval = null;
+        }
     });
+
+    startStatusHeartbeat();
 });
 
 // ────────────────────────────────────────
 // 2. Dispatcher de captura
 // ────────────────────────────────────────
-let micStream = null;
 
 function startCapture() {
     const state = _getState();
@@ -100,10 +114,10 @@ function stopCapture() {
 }
 
 // ────────────────────────────────────────
-// 3. Captura de Microfone
+// 3. Captura de Microfone (PowerShell)
 // ────────────────────────────────────────
 function startMic() {
-    console.log('>> [VoIP Helper] Iniciando captura de Microfone (naudiodon)...');
+    console.log('>> [VoIP Helper] Iniciando captura de Microfone (PowerShell)...');
     startMicAudio(
         (chunk) => sendPcmChunk(chunk, mainVoipWs, opus, WebSocket.OPEN),
         (e) => console.error('>> [VoIP Helper] Erro no microfone:', e)
@@ -123,10 +137,42 @@ function stopMic() {
 // ────────────────────────────────────────
 // 4. Lista de dispositivos para o OTClient
 // ────────────────────────────────────────
-function sendDeviceList() {
-    const devices = listAudioDevices();
+async function sendDeviceList() {
+    const devices = await listAudioDevices();
+    console.log('>> [VoIP Helper] Enviando lista de microfones:', devices.map(d => d.name));
     if (localWs) localWs.send(JSON.stringify({ type: 'DEVICE_LIST', devices }));
-    console.log('>> [VoIP Helper] Dispositivos enviados ao OTClient:', devices.length);
+}
+
+async function sendDeviceListOut() {
+    const devices = await listAudioOutputDevices();
+    console.log('>> [VoIP Helper] Enviando lista de saídas:', devices.map(d => d.name));
+    if (localWs) localWs.send(JSON.stringify({ type: 'DEVICE_LIST_OUT', devices }));
+}
+
+// ────────────────────────────────────────
+// 4b. Teste de Áudio (Loopback)
+// ────────────────────────────────────────
+function startAudioTest() {
+    console.log('>> [VoIP Helper] Iniciando Teste de Áudio (Loopback)...');
+    if (testAudioInput) stopAudioTest();
+    
+    // Garantir que temos um speaker ativo para o teste
+    if (!speaker) speaker = startPlayback();
+
+    testAudioInput = startMicAudio(
+        (chunk) => {
+            if (speaker) speaker.write(chunk);
+        },
+        (e) => console.error('>> [VoIP Helper] Erro no teste de áudio:', e)
+    );
+}
+
+function stopAudioTest() {
+    console.log('>> [VoIP Helper] Parando Teste de Áudio.');
+    if (testAudioInput) {
+        try { testAudioInput.quit(); } catch (_) {}
+        testAudioInput = null;
+    }
 }
 
 // ────────────────────────────────────────
@@ -134,6 +180,9 @@ function sendDeviceList() {
 // ────────────────────────────────────────
 function connectToMainVoip(url, sessionKey) {
     if (mainVoipWs) mainVoipWs.close();
+    
+    // Garantir speaker para áudio remoto
+    if (!speaker) speaker = startPlayback();
 
     console.log(`>> [VoIP Helper] Conectando ao Servidor Principal: ${url}`);
     mainVoipWs = new WebSocket(url);
@@ -158,36 +207,44 @@ function connectToMainVoip(url, sessionKey) {
 
     mainVoipWs.on('close', (code) => {
         console.log(`>> [VoIP Helper] Desconectado do Servidor Principal. Código: ${code}`);
-        if (statusInterval) clearInterval(statusInterval);
     });
 
-    // Start Ping and Status reporting
+    mainVoipWs.on('error', (e) => {
+        console.error('>> [VoIP Helper] Erro na conexão com o Servidor Principal:', e.message);
+    });
+}
+
+function startStatusHeartbeat() {
     if (statusInterval) clearInterval(statusInterval);
+    
     statusInterval = setInterval(() => {
+        // Ping ao server principal se estiver conectado
         if (mainVoipWs && mainVoipWs.readyState === WebSocket.OPEN) {
             lastPingTime = Date.now();
             mainVoipWs.send(JSON.stringify({ type: 'ping' }));
         }
 
-        // Send update to OTClient
-        if (localWs) {
+        // Heartbeat para o OTClient
+        if (localWs && localWs.readyState === WebSocket.OPEN) {
+            let status = 'offline';
+            if (mainVoipWs && mainVoipWs.readyState === WebSocket.OPEN) {
+                status = currentLatency < 150 ? 'stable' : 'unstable';
+            }
+
             const state = _getState();
             localWs.send(JSON.stringify({
                 type: 'STATUS_UPDATE',
+                voiceLevel: state.voiceLevel,
                 members: [
                     { 
-                        name: 'LOCAL_USER', // OTClient will handle mapping to current character
+                        name: 'LOCAL_USER', 
                         latency: currentLatency, 
-                        status: (mainVoipWs && mainVoipWs.readyState === WebSocket.OPEN) ? 'online' : 'offline'
+                        status: status
                     }
                 ]
             }));
         }
-    }, 2000);
-
-    mainVoipWs.on('error', (e) => {
-        console.error('>> [VoIP Helper] Erro na conexão com o Servidor Principal:', e.message);
-    });
+    }, 2000); // 2s é suficiente para manter a conexão ativa e não pesar
 }
 
 // ────────────────────────────────────────

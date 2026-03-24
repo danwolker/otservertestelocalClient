@@ -64,6 +64,11 @@ local function getCreatureByName(name)
 end
 
 function init()
+  if not json then
+    local ok, err = pcall(function() dofile('/modules/corelib/json.lua') end)
+    if not ok then print(">> [VoIP] Warning: Failed to load json.lua: " .. tostring(err)) end
+  end
+  
   voipButton = modules.client_topmenu.addRightGameToggleButton(
     'voipButton', tr('Party VoIP'), '/data/images/topbuttons/audio', toggle
   )
@@ -89,19 +94,27 @@ function init()
 end
 
 function connectToHelper()
-  if helperWs then return end
+  if helperWs then
+    pcall(function() helperWs.close() end)
+    helperWs = nil
+  end
+
   
-  print(">> [VoIP] Connecting to local Helper (ws://localhost:3002)...")
+  print(">> [VoIP] Connecting to local Helper (ws://127.0.0.1:3002/)...")
   local callbacks = {
     onOpen = function()
       print(">> [VoIP] Connected to local Helper.")
       if helperRetryEvent then
+
         removeEvent(helperRetryEvent)
         helperRetryEvent = nil
       end
     end,
     onMessage = function(data)
       if data.type == 'STATUS_UPDATE' then
+        if data.voiceLevel and modules.client_options and modules.client_options.updateVoiceActivity then
+          modules.client_options.updateVoiceActivity(data.voiceLevel)
+        end
         local localName = g_game.getCharacterName()
         for _, member in ipairs(data.members) do
           local name = member.name
@@ -114,8 +127,14 @@ function connectToHelper()
           end
         end
       elseif data.type == 'DEVICE_LIST' then
+        print(">> [VoIP] Received Device List: " .. #data.devices .. " devices")
         if modules.client_options and modules.client_options.updateDeviceList then
           modules.client_options.updateDeviceList(data.devices)
+        end
+      elseif data.type == 'DEVICE_LIST_OUT' then
+        print(">> [VoIP] Received Speaker List: " .. #data.devices .. " devices")
+        if modules.client_options and modules.client_options.updateSpeakerList then
+          modules.client_options.updateSpeakerList(data.devices)
         end
       end
     end,
@@ -131,20 +150,47 @@ function connectToHelper()
     end
   }
   
-  local ok, res = pcall(function() return HTTP.webSocketJSON("ws://localhost:3002", callbacks) end)
+  local ok, res = pcall(function() return HTTP.webSocketJSON("ws://127.0.0.1:3002/", callbacks) end)
   if ok then
     helperWs = res
+    print(">> [VoIP] WebSocket request sent (checking connection status next...)")
   else
-    print(">> [VoIP] Failed to open WebSocket to Helper: " .. res)
+    print(">> [VoIP] Failed to open WebSocket to Helper: " .. tostring(res))
     if not helperRetryEvent then
       helperRetryEvent = scheduleEvent(connectToHelper, 5000)
     end
   end
 end
 
+local function simpleJson(t)
+  local res = {}
+  for k,v in pairs(t) do
+    table.insert(res, string.format('"%s":"%s"', tostring(k), tostring(v)))
+  end
+  return "{" .. table.concat(res, ",") .. "}"
+end
+
 function sendToHelper(data)
   if helperWs then
-    helperWs.send(data)
+    local ok, encoded
+    -- For simple commands, use manual encoder to avoid json.lua issues
+    if type(data) == 'table' and not data.members and not data.devices then
+      encoded = simpleJson(data)
+      ok = true
+    else
+      ok, encoded = pcall(function() return json.encode(data) end)
+    end
+    
+    if ok then
+      local sendOk, err = pcall(function() return helperWs.send(encoded) end)
+      if not sendOk then
+        print(">> [VoIP] Error sending to Helper: " .. tostring(err))
+      end
+    else
+      print(">> [VoIP] Error encoding JSON for Helper: " .. tostring(encoded))
+    end
+  else
+    print(">> [VoIP] Error: Cannot send to Helper (Socket not connected)")
   end
 end
 
@@ -758,4 +804,20 @@ end
 
 function setDevice(deviceId)
   sendToHelper({ type = 'SET_DEVICE', deviceId = deviceId })
+end
+
+function getDevicesOut()
+  sendToHelper({ type = 'LIST_DEVICES_OUT' })
+end
+
+function setDeviceOut(deviceId)
+  sendToHelper({ type = 'SET_DEVICE_OUT', deviceId = deviceId })
+end
+
+function startTest()
+  sendToHelper({ type = 'TEST_START' })
+end
+
+function stopTest()
+  sendToHelper({ type = 'TEST_STOP' })
 end

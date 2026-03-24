@@ -9,10 +9,8 @@
     "test:coverage": "jest --testPathPattern=__tests__ --coverage"
   },
   "dependencies": {
+    "@discordjs/opus": "^0.10.0",
     "naudiodon": "^2.0.0",
-    "node-record-lpcm16": "^1.0.1",
-    "opusscript": "^0.1.1",
-    "speaker": "^0.5.1",
     "ws": "^8.18.0"
   },
   "devDependencies": {

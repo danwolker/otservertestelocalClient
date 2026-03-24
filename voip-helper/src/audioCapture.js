@@ -1,6 +1,7 @@
 'use strict';
 
-const naudiodon = require('naudiodon');
+const { spawn, execSync, exec } = require('child_process');
+const path = require('path');
 
 // ────────────────────────────────────────
 // Configurações de Áudio
@@ -11,15 +12,6 @@ const FRAME_SIZE = 960; // 20ms @ 48kHz
 const BYTES_PER_SAMPLE = 2; // 16-bit PCM
 const FRAME_BYTES = FRAME_SIZE * CHANNELS * BYTES_PER_SAMPLE;
 
-const LOOPBACK_KEYWORDS = [
-    'stereo mix',
-    'loopback',
-    'wave out',
-    'what u hear',
-    'mistura estéreo',
-    'mapeador de som',
-];
-
 // ────────────────────────────────────────
 // Estado interno (mutável via funções)
 // ────────────────────────────────────────
@@ -27,9 +19,25 @@ let _state = {
     captureMode: 'mic',         // 'mic' | 'system'
     isTalking: false,
     preferredDeviceId: null,    // null = determiado automaticamente
+    preferredSpeakerId: null,   // null = default
     systemAudioInput: null,
+    micAudioInput: null,
     pcmBuffer: Buffer.alloc(0),
+    voiceLevel: 0,
 };
+
+function calculateVolume(buffer) {
+    let sum = 0;
+    const samples = buffer.length / 2;
+    for (let i = 0; i < buffer.length; i += 2) {
+        let sample = buffer.readInt16LE(i);
+        sum += sample * sample;
+    }
+    const rms = Math.sqrt(sum / samples);
+    // Normalizar: 0 a 100 (ajustando sensitividade para 0-2000 RMS -> 0-100)
+    let level = Math.floor((rms / 2000) * 100);
+    return Math.min(100, level);
+}
 
 // Permite substituição de estado em testes
 function _getState() { return _state; }
@@ -38,7 +46,9 @@ function _resetState() {
         captureMode: 'mic',
         isTalking: false,
         preferredDeviceId: null,
+        preferredSpeakerId: null,
         systemAudioInput: null,
+        micAudioInput: null,
         pcmBuffer: Buffer.alloc(0),
     };
 }
@@ -46,15 +56,8 @@ function _resetState() {
 // ────────────────────────────────────────
 // setCaptureMode
 // ────────────────────────────────────────
-/**
- * Define o modo de captura de áudio.
- * @param {'mic'|'system'} mode
- * @returns {boolean} true se o modo foi alterado, false se inválido
- */
 function setCaptureMode(mode) {
-    if (mode !== 'mic' && mode !== 'system') {
-        return false;
-    }
+    if (mode !== 'mic' && mode !== 'system') return false;
     _state.captureMode = mode;
     return true;
 }
@@ -62,62 +65,48 @@ function setCaptureMode(mode) {
 // ────────────────────────────────────────
 // detectLoopbackDevice
 // ────────────────────────────────────────
-/**
- * Detecta automaticamente um dispositivo loopback disponível via naudiodon.
- * @returns {number} ID do dispositivo loopback, ou -1 se nenhum encontrado
- */
 function detectLoopbackDevice() {
-    let devices;
-    try {
-        devices = naudiodon.getDevices();
-    } catch (_) {
-        return -1;
-    }
-
-    const found = devices.find(d =>
-        d.maxInputChannels > 0 &&
-        LOOPBACK_KEYWORDS.some(kw => d.name.toLowerCase().includes(kw))
-    );
-
-    return found ? found.id : -1;
+    return -1; // Não suportado nativamente pelo script PS atualmente
 }
 
 // ────────────────────────────────────────
 // listAudioDevices
 // ────────────────────────────────────────
 /**
- * Retorna lista de dispositivos de entrada de áudio mapeados.
+ * Retorna lista de dispositivos de entrada de áudio mapeados usando PowerShell.
  * @returns {Array<{id, name, hostAPI, isLoopback}>}
  */
 function listAudioDevices() {
-    let devices;
-    try {
-        devices = naudiodon.getDevices();
-    } catch (_) {
-        return [];
-    }
-
-    return devices
-        .filter(d => d.maxInputChannels > 0)
-        .map(d => ({
-            id: d.id,
-            name: d.name,
-            hostAPI: d.hostAPIName,
-            isLoopback: LOOPBACK_KEYWORDS.some(kw => d.name.toLowerCase().includes(kw)),
-        }));
+    return new Promise((resolve, reject) => {
+        const scriptPath = path.join(__dirname, '..', 'list_audio.ps1');
+        exec(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, { encoding: 'utf8' }, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`>> [VoIP Helper] Erro ao listar microfones (PowerShell): ${error.message}`);
+                return resolve([]);
+            }
+            
+            const devices = [];
+            const lines = stdout.split('\n');
+            
+            for (const line of lines) {
+                const match = line.match(/Device (\d+): (.+)/);
+                if (match) {
+                    devices.push({
+                        id: parseInt(match[1]),
+                        name: match[2].trim().replace(/\r/g, ''),
+                        hostAPI: 'Windows API',
+                        isLoopback: false
+                    });
+                }
+            }
+            resolve(devices);
+        });
+    });
 }
 
 // ────────────────────────────────────────
 // sendPcmChunk
 // ────────────────────────────────────────
-/**
- * Acumula chunks de PCM e envia frames Opus completos via WebSocket.
- * @param {Buffer} chunk - Dados PCM brutos
- * @param {object} ws - Instância WebSocket (deve ter readyState e send())
- * @param {object} opus - Instância OpusScript
- * @param {number} wsOpen - Valor que indica WS aberto (WebSocket.OPEN)
- * @returns {number} Quantidade de frames Opus enviados
- */
 function sendPcmChunk(chunk, ws, opus, wsOpen) {
     if (!ws || ws.readyState !== wsOpen) return 0;
 
@@ -129,7 +118,7 @@ function sendPcmChunk(chunk, ws, opus, wsOpen) {
         _state.pcmBuffer = _state.pcmBuffer.slice(FRAME_BYTES);
 
         try {
-            const encoded = opus.encode(frame, FRAME_SIZE);
+            const encoded = opus.encode(frame);
             ws.send(encoded);
             framesSent++;
         } catch (e) {
@@ -144,31 +133,48 @@ function sendPcmChunk(chunk, ws, opus, wsOpen) {
 // startMicAudio
 // ────────────────────────────────────────
 /**
- * Inicia captura de microfone via naudiodon.
- * @param {Function} onChunk - Callback para chunks PCM
- * @param {Function} onError - Callback para erros
+ * Inicia captura de microfone via script PowerShell.
  */
 function startMicAudio(onChunk, onError) {
-    const options = {
-        inOptions: {
-            channelCount: CHANNELS,
-            sampleFormat: naudiodon.SampleFormat16Bit,
-            sampleRate: SAMPLE_RATE,
-            // deviceId: null usa o default
-            closeOnError: false,
+    const scriptPath = path.join(__dirname, '..', 'capture_audio.ps1');
+    const deviceId = _state.preferredDeviceId !== null ? _state.preferredDeviceId : -1;
+    
+    // Create a wrapper object that looks like an EventEmitter
+    const audioInput = {
+        process: null,
+        on: function(event, callback) {
+            if (event === 'data') this.onData = callback;
+            if (event === 'error') this.onError = callback;
+        },
+        start: function() {
+            this.process = spawn('powershell', ['-ExecutionPolicy', 'Bypass', '-File', scriptPath, deviceId.toString()]);
+            
+            this.process.stdout.on('data', (data) => {
+                _state.voiceLevel = calculateVolume(data);
+                if (this.onData) this.onData(data);
+            });
+            
+            this.process.stderr.on('data', (data) => {
+                const msg = data.toString();
+                if (msg.includes('Failed')) {
+                    if (this.onError) this.onError(new Error(msg));
+                }
+            });
+        },
+        quit: function() {
+            if (this.process) {
+                try {
+                    _state.voiceLevel = 0;
+                    this.process.stdin.write('q\n');
+                    this.process.kill();
+                } catch (e) {}
+            }
         }
     };
 
-    let audioInput;
-    try {
-        audioInput = new naudiodon.AudioIO(options);
-    } catch (e) {
-        if (onError) onError(e);
-        return null;
-    }
-
     audioInput.on('data', onChunk);
-    audioInput.on('error', (e) => { if (onError) onError(e); });
+    if (onError) audioInput.on('error', onError);
+    
     audioInput.start();
 
     _state.isTalking = true;
@@ -181,83 +187,106 @@ function startMicAudio(onChunk, onError) {
 // ────────────────────────────────────────
 // startSystemAudio
 // ────────────────────────────────────────
-/**
- * Inicia captura de áudio do sistema via WASAPI loopback.
- * @param {Function} onChunk - Callback chamado a cada chunk PCM recebido
- * @param {Function} onError - Callback chamado em caso de erro
- * @returns {object|null} instância AudioIO ou null em caso de falha
- */
 function startSystemAudio(onChunk, onError) {
-    const deviceId = _state.preferredDeviceId !== null
-        ? _state.preferredDeviceId
-        : detectLoopbackDevice();
+    return startMicAudio(onChunk, onError); // PS script does default device if no loopback logic yet
+}
 
-    const options = {
-        inOptions: {
-            channelCount: CHANNELS,
-            sampleFormat: naudiodon.SampleFormat16Bit,
-            sampleRate: SAMPLE_RATE,
-            deviceId,
-            closeOnError: false,
+/**
+ * Retorna lista de dispositivos de saída de áudio mapeados usando PowerShell.
+ * @returns {Promise<Array<{id, name}>>}
+ */
+function listAudioOutputDevices() {
+    return new Promise((resolve, reject) => {
+        const scriptPath = path.join(__dirname, '..', 'list_audio_out.ps1');
+        exec(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, { encoding: 'utf8' }, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`>> [VoIP Helper] Erro ao listar saídas (PowerShell): ${error.message}`);
+                // Log stderr for more details if available
+                if (stderr) console.error(`>> [VoIP Helper] PowerShell stderr: ${stderr}`);
+                return resolve([]); // Resolve with empty array on error
+            }
+            
+            const devices = [];
+            const lines = stdout.split('\n');
+            
+            for (const line of lines) {
+                const match = line.match(/Device (\d+): (.+)/);
+                if (match) {
+                    devices.push({
+                        id: parseInt(match[1]),
+                        name: match[2].trim().replace(/\r/g, ''),
+                    });
+                }
+            }
+            resolve(devices);
+        });
+    });
+}
+
+// ────────────────────────────────────────
+// startPlayback
+// ────────────────────────────────────────
+/**
+ * Inicia reprodução de áudio via script PowerShell.
+ */
+function startPlayback() {
+    const scriptPath = path.join(__dirname, '..', 'play_audio.ps1');
+    const deviceId = _state.preferredSpeakerId !== null ? _state.preferredSpeakerId : -1;
+    
+    let audioOutput = {
+        process: spawn('powershell', ['-ExecutionPolicy', 'Bypass', '-File', scriptPath, deviceId.toString()]),
+        write: function(data) {
+            if (this.process && this.process.stdin.writable) {
+                try {
+                    this.process.stdin.write(data);
+                } catch (e) {
+                    console.error('>> [VoIP Helper] Erro ao escrever no playback:', e.message);
+                }
+            }
+        },
+        end: function() {
+            if (this.process) {
+                try { this.process.kill(); } catch (e) {}
+            }
         }
     };
 
-    let audioInput;
-    try {
-        audioInput = new naudiodon.AudioIO(options);
-    } catch (e) {
-        if (onError) onError(e);
-        return null;
-    }
-
-    audioInput.on('data', onChunk);
-    audioInput.on('error', (e) => { if (onError) onError(e); });
-    audioInput.start();
-
-    _state.isTalking = true;
-    _state.systemAudioInput = audioInput;
-    _state.pcmBuffer = Buffer.alloc(0);
-
-    return audioInput;
+    return audioOutput;
 }
 
 // ────────────────────────────────────────
 // handleClientCommand
 // ────────────────────────────────────────
-/**
- * Processa um comando JSON vindo do OTClient.
- * @param {object} data - Objeto com campo `type` e dados do comando
- * @param {object} handlers - Implementações das ações { connect, startCapture, stopCapture, listDevices }
- * @returns {string|null} O tipo do comando processado, ou null se desconhecido
- */
 function handleClientCommand(data, handlers) {
     switch (data.type) {
         case 'CONNECT':
             if (handlers.connect) handlers.connect(data.wsUrl, data.sessionKey);
             return 'CONNECT';
-
         case 'SET_CAPTURE_MODE':
             setCaptureMode(data.mode);
             return 'SET_CAPTURE_MODE';
-
         case 'LIST_DEVICES':
             if (handlers.listDevices) handlers.listDevices();
             return 'LIST_DEVICES';
-
         case 'SET_DEVICE':
             if (typeof data.deviceId === 'number') {
                 _state.preferredDeviceId = data.deviceId;
             }
             return 'SET_DEVICE';
-
+        case 'LIST_DEVICES_OUT':
+            if (handlers.listDevicesOut) handlers.listDevicesOut();
+            return 'LIST_DEVICES_OUT';
+        case 'SET_DEVICE_OUT':
+            if (typeof data.deviceId === 'number') {
+                _state.preferredSpeakerId = data.deviceId;
+            }
+            return 'SET_DEVICE_OUT';
         case 'START_TALK':
             if (handlers.startCapture) handlers.startCapture();
             return 'START_TALK';
-
         case 'STOP_TALK':
             if (handlers.stopCapture) handlers.stopCapture();
             return 'STOP_TALK';
-
         default:
             return null;
     }
@@ -267,23 +296,21 @@ function handleClientCommand(data, handlers) {
 // Exports
 // ────────────────────────────────────────
 module.exports = {
-    // Funções principais
     setCaptureMode,
     detectLoopbackDevice,
     listAudioDevices,
+    listAudioOutputDevices,
     sendPcmChunk,
     startSystemAudio,
     startMicAudio,
+    startPlayback,
     handleClientCommand,
 
-    // Constantes
     SAMPLE_RATE,
     CHANNELS,
     FRAME_SIZE,
     FRAME_BYTES,
-    LOOPBACK_KEYWORDS,
 
-    // Estado (para testes)
     _getState,
     _resetState,
 };
