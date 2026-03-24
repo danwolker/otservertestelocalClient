@@ -147,18 +147,45 @@ function startMicAudio(onChunk, onError) {
             if (event === 'error') this.onError = callback;
         },
         start: function() {
-            this.process = spawn('powershell', ['-ExecutionPolicy', 'Bypass', '-File', scriptPath, deviceId.toString()]);
+            // Wait for compilation (Add-Type) warning
+            console.log(`>> [VoIP Helper] Iniciando captura de áudio (Pode levar alguns segundos para compilar o script PS)...`);
+            
+            console.log(`>> [VoIP Helper] Spawning PowerShell for deviceId: ${deviceId} using ${scriptPath}`);
+            this.process = spawn('powershell', [
+                '-NoProfile',
+                '-NonInteractive',
+                '-ExecutionPolicy', 'Bypass',
+                '-File', scriptPath, 
+                deviceId.toString()
+            ]);
             
             this.process.stdout.on('data', (data) => {
                 _state.voiceLevel = calculateVolume(data);
+                // Debug log to confirm data is coming in (max once per second to avoid spam)
+                if (!_state.lastLogTime || Date.now() - _state.lastLogTime > 1000) {
+                    console.log(`>> [VoIP Helper] Audio chunk received: ${data.length} bytes (Level: ${_state.voiceLevel})`);
+                    _state.lastLogTime = Date.now();
+                }
                 if (this.onData) this.onData(data);
             });
             
             this.process.stderr.on('data', (data) => {
                 const msg = data.toString();
+                console.error(`>> [VoIP Helper] Mic PS Stderr: ${msg}`);
                 if (msg.includes('Failed')) {
                     if (this.onError) this.onError(new Error(msg));
                 }
+            });
+
+            this.process.on('close', (code) => {
+                console.log(`>> [VoIP Helper] Mic PS process exited with code: ${code}`);
+                _state.isTalking = false;
+                _state.voiceLevel = 0;
+            });
+
+            this.process.on('error', (err) => {
+                console.error(`>> [VoIP Helper] Mic PS process spawn error:`, err);
+                if (this.onError) this.onError(err);
             });
         },
         quit: function() {
@@ -233,8 +260,25 @@ function startPlayback() {
     const scriptPath = path.join(__dirname, '..', 'play_audio.ps1');
     const deviceId = _state.preferredSpeakerId !== null ? _state.preferredSpeakerId : -1;
     
+    console.log(`>> [VoIP Helper] Spawning Playback PS for deviceId: ${deviceId} using ${scriptPath}`);
+    const playbackProcess = spawn('powershell', [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', scriptPath, 
+        deviceId.toString()
+    ]);
+
+    playbackProcess.stderr.on('data', (data) => {
+        console.error(`>> [VoIP Helper] Playback PS Stderr: ${data.toString()}`);
+    });
+
+    playbackProcess.on('close', (code) => {
+        console.log(`>> [VoIP Helper] Playback PS process exited with code: ${code}`);
+    });
+
     let audioOutput = {
-        process: spawn('powershell', ['-ExecutionPolicy', 'Bypass', '-File', scriptPath, deviceId.toString()]),
+        process: playbackProcess,
         write: function(data) {
             if (this.process && this.process.stdin.writable) {
                 try {
@@ -269,16 +313,18 @@ function handleClientCommand(data, handlers) {
             if (handlers.listDevices) handlers.listDevices();
             return 'LIST_DEVICES';
         case 'SET_DEVICE':
-            if (typeof data.deviceId === 'number') {
-                _state.preferredDeviceId = data.deviceId;
+            console.log(`>> [VoIP Helper] SET_DEVICE received: ${data.deviceId} (type: ${typeof data.deviceId})`);
+            if (typeof data.deviceId === 'number' || typeof data.deviceId === 'string') {
+                _state.preferredDeviceId = parseInt(data.deviceId);
             }
             return 'SET_DEVICE';
         case 'LIST_DEVICES_OUT':
             if (handlers.listDevicesOut) handlers.listDevicesOut();
             return 'LIST_DEVICES_OUT';
         case 'SET_DEVICE_OUT':
-            if (typeof data.deviceId === 'number') {
-                _state.preferredSpeakerId = data.deviceId;
+            console.log(`>> [VoIP Helper] SET_DEVICE_OUT received: ${data.deviceId} (type: ${typeof data.deviceId})`);
+            if (typeof data.deviceId === 'number' || typeof data.deviceId === 'string') {
+                _state.preferredSpeakerId = parseInt(data.deviceId);
             }
             return 'SET_DEVICE_OUT';
         case 'START_TALK':
@@ -287,6 +333,12 @@ function handleClientCommand(data, handlers) {
         case 'STOP_TALK':
             if (handlers.stopCapture) handlers.stopCapture();
             return 'STOP_TALK';
+        case 'TEST_START':
+            if (handlers.testStart) handlers.testStart();
+            return 'TEST_START';
+        case 'TEST_STOP':
+            if (handlers.testStop) handlers.testStop();
+            return 'TEST_STOP';
         default:
             return null;
     }

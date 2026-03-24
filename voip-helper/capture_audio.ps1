@@ -11,7 +11,7 @@ public class AudioCapture {
     private const int WAVE_MAPPER = -1;
     private const int CALLBACK_FUNCTION = 0x30000;
     private const int WHDR_DONE = 0x00000001;
-    private const int MM_WIM_DATA = 0x3BF;
+    private const int MM_WIM_DATA = 0x3C0;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct WAVEFORMATEX {
@@ -111,6 +111,9 @@ public class AudioCapture {
         format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign;
         format.cbSize = 0;
 
+        format.cbSize = 0;
+
+        Console.Error.WriteLine("INFO: Starting waveInOpen for device: " + deviceId);
         callback = new waveInProc(Callback);
         uint result = waveInOpen(out hWaveIn, deviceId, ref format, callback, IntPtr.Zero, CALLBACK_FUNCTION);
         
@@ -119,6 +122,7 @@ public class AudioCapture {
             return;
         }
 
+        Console.Error.WriteLine("INFO: waveInOpen successful.");
         for (int i = 0; i < BUFFER_COUNT; i++) {
             buffers[i] = Marshal.AllocHGlobal(BUFFER_SIZE);
             headers[i] = new WAVEHDR();
@@ -131,13 +135,16 @@ public class AudioCapture {
         }
 
         isRecording = true;
+        Console.Error.WriteLine("INFO: Calling waveInStart.");
         waveInStart(hWaveIn);
+        Console.Error.WriteLine("INFO: Capture loop started.");
 
         // Keep alive until process is killed
         while (isRecording) {
             Thread.Sleep(500);
         }
 
+        Console.Error.WriteLine("INFO: Stopping capture...");
         StopCapture();
     }
 

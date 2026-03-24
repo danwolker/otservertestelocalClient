@@ -244,7 +244,7 @@ function startStatusHeartbeat() {
                 ]
             }));
         }
-    }, 2000); // 2s é suficiente para manter a conexão ativa e não pesar
+    }, 200); // 200ms is standard for responsive UI indicators without overhead
 }
 
 // ────────────────────────────────────────
