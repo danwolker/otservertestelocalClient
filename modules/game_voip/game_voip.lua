@@ -3,6 +3,7 @@ voipButton = nil
 voipUpdateEvent = nil
 
 local OPCODE_VOIP = 200
+local OPCODE_SESSION = 210
 local OPCODE_SPEAKING = 201
 
 local VOCATION_NAMES = {
@@ -79,6 +80,7 @@ function init()
   voipWindow:close()
 
   ProtocolGame.registerExtendedOpcode(OPCODE_VOIP, onVoipUpdate)
+  ProtocolGame.registerExtendedOpcode(OPCODE_SESSION, onExtendedVoipSession)
   ProtocolGame.registerOpcode(0xE0, onVoipSession)
   ProtocolGame.registerOpcode(0xE1, onVoipClose)
   connect(g_game, { onGameStart = onGameStart, onGameEnd = clearMembers })
@@ -241,6 +243,7 @@ end
 function terminate()
   removeEvent(voipUpdateEvent)
   ProtocolGame.unregisterExtendedOpcode(OPCODE_VOIP)
+  ProtocolGame.unregisterExtendedOpcode(OPCODE_SESSION)
   ProtocolGame.unregisterOpcode(0xE0)
   ProtocolGame.unregisterOpcode(0xE1)
   disconnect(g_game, { onGameStart = onGameStart, onGameEnd = clearMembers })
@@ -369,6 +372,57 @@ function onVoipUpdate(protocol, opcode, buffer)
   if not voipUpdateEvent then
     voipUpdateEvent = scheduleEvent(updateBars, 500)
   end
+end
+
+function onExtendedVoipSession(protocol, opcode, buffer)
+  if not buffer or buffer == "" then return end
+  
+  local ok, data = pcall(function() return json.decode(buffer) end)
+  if not ok then
+    print(">> [VoIP] Error decoding session JSON: " .. tostring(data))
+    return
+  end
+
+  local session = data
+  local memberList = voipWindow:recursiveGetChildById('voipMemberList')
+  
+  if voipWindow:recursiveGetChildById('descriptionLabel') then
+    voipWindow:recursiveGetChildById('descriptionLabel'):hide()
+  end
+
+  local currentMembers = {}
+  for _, member in ipairs(session.members) do
+    local name = member.name
+    local vocName = VOCATION_NAMES[member.vocation] or "None"
+    
+    partyData[name] = { id = member.playerId, vocID = member.vocation, isLeader = member.isLeader }
+    addMember(name, vocName, member.isLeader, nil, 100, 100)
+    currentMembers[name] = true
+  end
+
+  -- Remove members that left
+  for _, child in ipairs(memberList:getChildren()) do
+    local childName = child:getId()
+    if not currentMembers[childName] then
+      partyData[childName] = nil
+      child:destroy()
+    end
+  end
+
+  voipWindow:open()
+  voipButton:setOn(true)
+
+  if not voipUpdateEvent then
+    voipUpdateEvent = scheduleEvent(updateBars, 500)
+  end
+
+  -- Notify Helper about new session
+  print(">> [VoIP] Session Join (JSON): " .. session.wsUrl .. " | Room: " .. session.roomId)
+  sendToHelper({
+    type = 'CONNECT',
+    wsUrl = session.wsUrl,
+    sessionKey = session.sessionKey
+  })
 end
 
 function onVoipSession(protocol, msg)
