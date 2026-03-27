@@ -34,3 +34,6 @@ Thumbs.db
 # Modules
 node_modules/
 **/node_modules/
+
+# Local Config
+.env
