@@ -43,6 +43,22 @@ public class AudioPlay {
     [DllImport("winmm.dll", SetLastError = true)]
     public static extern uint waveOutUnprepareHeader(IntPtr hwo, IntPtr pwh, uint cbwh);
 
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct WAVEOUTCAPS {
+        public ushort wMid;
+        public ushort wPid;
+        public uint vDriverVersion;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string szPname;
+        public uint dwFormats;
+        public ushort wChannels;
+        public ushort wReserved1;
+        public uint dwSupport;
+    }
+
+    [DllImport("winmm.dll", SetLastError = true)]
+    public static extern uint waveOutGetDevCaps(uint hwo, ref WAVEOUTCAPS pwoc, uint cbwoc);
+
     [DllImport("winmm.dll", SetLastError = true)]
     public static extern uint waveOutClose(IntPtr hwo);
 
@@ -59,8 +75,12 @@ public class AudioPlay {
         IntPtr hWaveOut;
         uint result = waveOutOpen(out hWaveOut, deviceId, ref format, IntPtr.Zero, IntPtr.Zero, 0);
         
-        if (result != 0) {
-            Console.Error.WriteLine("Failed to open output audio device.");
+        if (result == 0) {
+            WAVEOUTCAPS caps = new WAVEOUTCAPS();
+            waveOutGetDevCaps((uint)deviceId, ref caps, (uint)Marshal.SizeOf(typeof(WAVEOUTCAPS)));
+            Console.WriteLine(">> [WaveOut] Opened Device Index " + deviceId + ": " + caps.szPname);
+        } else {
+            Console.Error.WriteLine("Failed to open output audio device (Result: " + result + ").");
             return;
         }
 

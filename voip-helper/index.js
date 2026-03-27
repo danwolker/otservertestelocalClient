@@ -51,18 +51,66 @@ wss.on('connection', (ws) => {
         try {
             const data = JSON.parse(message);
             console.log(`>> [VoIP Helper] Comando recebido: ${data.type}`);
+
+            // ─── Comandos de controle de sala: repassar direto ao VoIP server ───
+            if (data.type === 'MUTE_MEMBER') {
+                // Mute local: instruir o servidor a não repassar áudio de targetId para este cliente
+                if (clientCtx.mainVoipWs && clientCtx.mainVoipWs.readyState === WebSocket.OPEN) {
+                    clientCtx.mainVoipWs.send(JSON.stringify({
+                        type: 'mute_member',
+                        targetPlayerId: data.targetId,
+                        muted: data.muted
+                    }));
+                    console.log(`>> [VoIP Helper] Mute local enviado ao servidor: ID ${data.targetId} -> ${data.muted}`);
+                } else {
+                    console.warn('>> [VoIP Helper] MUTE_MEMBER ignorado: sem conexão com servidor principal');
+                }
+                return;
+            }
+
+            if (data.type === 'GLOBAL_MUTE') {
+                // Mute global: somente o líder pode ativar, servidor valida
+                if (clientCtx.mainVoipWs && clientCtx.mainVoipWs.readyState === WebSocket.OPEN) {
+                    clientCtx.mainVoipWs.send(JSON.stringify({
+                        type: 'mute_global',
+                        muted: data.muted
+                    }));
+                    console.log(`>> [VoIP Helper] Mute global enviado ao servidor: ${data.muted}`);
+                } else {
+                    console.warn('>> [VoIP Helper] GLOBAL_MUTE ignorado: sem conexão com servidor principal');
+                }
+                return;
+            }
+
+            // ─── Outros comandos: delegar ao audioCapture ───
             handleClientCommand(data, {
                 connect:      (url, key) => connectToMainVoip(clientCtx, url, key),
                 startCapture: () => startCapture(clientCtx),
                 stopCapture:  () => stopCapture(clientCtx),
                 listDevices:  async () => await sendDeviceList(clientCtx),
                 listDevicesOut: async () => await sendDeviceListOut(clientCtx),
+                setDevice: (deviceId) => {
+                    console.log(`>> [VoIP Helper] Novo microfone selecionado: ${deviceId}`);
+                    const state = _getState();
+                    if (state.isTalking) {
+                        console.log('>> [VoIP Helper] Reiniciando captura com novo dispositivo...');
+                        stopCapture(clientCtx);
+                        startCapture(clientCtx);
+                    }
+                },
                 setDeviceOut: (deviceId) => {
-                    console.log(`>> [VoIP Helper] Selecionando Speaker ID: ${deviceId}`);
+                    console.log(`>> [VoIP Helper] EVENTO: Troca de saída de áudio para ID: ${deviceId}`);
                     if (clientCtx.speaker) {
-                        clientCtx.speaker.end();
+                        console.log('>> [VoIP Helper] Encerrando speaker atual...');
+                        try {
+                            clientCtx.speaker.end();
+                        } catch (e) {
+                            console.error('>> [VoIP Helper] Erro ao encerrar speaker:', e);
+                        }
                         clientCtx.speaker = null;
-                        // O proximo audio recebido reativará o speaker
+                        console.log('>> [VoIP Helper] Speaker limpo. Aguardando novo áudio para reiniciar...');
+                    } else {
+                        console.log('>> [VoIP Helper] Nenhum speaker ativo para encerrar.');
                     }
                 },
                 testStart:    () => startAudioTest(clientCtx),

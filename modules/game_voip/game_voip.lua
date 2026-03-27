@@ -29,9 +29,10 @@ local VOCATION_MUTE_ID = {
 }
 
 -- member data stored by name, populated from server opcode
-local partyData = {}  -- {name -> {vocID, isLeader}}
+local partyData = {}  -- {name -> {vocID, isLeader, id}}
 local mutedVocations = {}
-local mutedPlayers = {}
+local mutedPlayers = {}      -- mute LOCAL: jogadores ignorados por mim nesta sessão
+local isGlobalMuted = false  -- estado do mute global da sala (enviado pelo líder)
 local pttBinding = nil
 local pttPressed = false
 local checkPttEvent = nil
@@ -131,6 +132,27 @@ function connectToHelper()
             refreshMemberUI(name)
           end
         end
+        
+      elseif data.type == 'global_mute_changed' then
+        -- Notificação vinda do servidor: líder alterou o mute global da sala
+        isGlobalMuted = data.muted
+        local estado = data.muted and 'ATIVADO' or 'DESATIVADO'
+        local msg = 'Mute global ' .. estado .. ' pelo líder ' .. tostring(data.byLeader) .. '.'
+        if not data.muted or isLocalLeader() then
+          modules.game_textmessage.displayStatusMessage(msg)
+        end
+        -- Atualizar indicadores visuais de todos os membros
+        for name, _ in pairs(partyData) do
+          refreshMemberUI(name)
+        end
+
+      elseif data.type == 'mute_member_ack' then
+        -- Confirmação do servidor que o mute local foi aplicado
+        print('[VoIP] Mute local confirmado pelo servidor: ID ' .. tostring(data.targetPlayerId) .. ' -> ' .. tostring(data.muted))
+
+      elseif data.type == 'error' then
+        modules.game_textmessage.displayFailureMessage('[VoIP] ' .. tostring(data.message))
+
       elseif data.type == 'DEVICE_LIST' then
         print(">> [VoIP] Received Device List: " .. #data.devices .. " devices")
         if modules.client_options and modules.client_options.updateDeviceList then
@@ -493,6 +515,8 @@ end
 
 function clearMembers()
   partyData = {}
+  mutedPlayers = {}
+  isGlobalMuted = false
   removeEvent(voipUpdateEvent)
   voipUpdateEvent = nil
   if not voipWindow then return end
@@ -539,38 +563,44 @@ function refreshMemberUI(name)
   if not data then return end
 
   local vocMuteId = VOCATION_MUTE_ID[data.vocID] or "All"
-  local isMuted = mutedVocations["All"] or mutedVocations[vocMuteId] or mutedPlayers[name]
-  local indicator = widget:getChildById('voiceIndicator')
+  -- Mute LOCAL por vocação ou por jogador individual
+  local isMutedLocally = mutedVocations["All"] or mutedVocations[vocMuteId] or mutedPlayers[name]
+  -- O líder nunca aparece como mutado na UI, independente de qualquer flag
+  if data.isLeader then isMutedLocally = false end
 
+  local indicator = widget:getChildById('voiceIndicator')
   local status = data.status or 'offline'
   local latency = data.latency or 0
   local qualityWidget = widget:getChildById('connectionQuality')
 
-  -- Update Connection Quality Color
+  -- Cor do indicador de qualidade de conexão
   if status == 'online' then
     if latency < 150 then
-      qualityWidget:setBackgroundColor('#00ff00') -- Green (Stable)
+      qualityWidget:setBackgroundColor('#00ff00')
     elseif latency < 400 then
-      qualityWidget:setBackgroundColor('#ffa500') -- Orange (Unstable)
+      qualityWidget:setBackgroundColor('#ffa500')
     else
-      qualityWidget:setBackgroundColor('#ff4500') -- Dark Orange/Weak
+      qualityWidget:setBackgroundColor('#ff4500')
     end
   else
-    qualityWidget:setBackgroundColor('#ff0000') -- Red (Disconnected)
+    qualityWidget:setBackgroundColor('#ff0000')
   end
 
-  if isMuted then
-    indicator:setBackgroundColor('#ff0000') -- Red for Muted
+  if isMutedLocally then
+    indicator:setBackgroundColor('#ff0000') -- Vermelho: mutado
+    indicator:setVisible(true)
+  elseif isGlobalMuted and not data.isLeader then
+    -- Sala em mute global: membro não-líder aparece como silenciado
+    indicator:setBackgroundColor('#888888') -- Cinza: mute global ativo
     indicator:setVisible(true)
   else
-    -- Use the isSpeaking state from partyData (synced from server)
+    -- Verde pulsando se está falando
     local isSpeaking = data.isSpeaking
     if name == g_game.getCharacterName() then
       isSpeaking = pttPressed
     end
-    
-    indicator:setBackgroundColor('#00ff00') -- Green for Speaking
-    indicator:setVisible(isSpeaking)
+    indicator:setBackgroundColor('#00ff00')
+    indicator:setVisible(isSpeaking == true)
   end
 end
 
@@ -705,6 +735,12 @@ function checkPttState()
   end
 end
 
+-- Helpers
+function isLocalLeader()
+  local localPlayer = g_game.getLocalPlayer()
+  return localPlayer and localPlayer:isPartyLeader()
+end
+
 function onMuteClick(widget)
   local id = widget:getId()
   local checked = not widget:isChecked()
@@ -718,7 +754,6 @@ function onMuteClick(widget)
     end
   else
     mutedVocations[id] = checked
-    -- Check if all individual buttons are checked -> auto-check All
     local header = voipWindow:recursiveGetChildById('muteHeader')
     local allChecked = true
     for _, child in ipairs(header:getChildren()) do
@@ -732,7 +767,6 @@ function onMuteClick(widget)
     mutedVocations["All"] = allChecked
   end
 
-  -- Refresh all member widgets
   for name, _ in pairs(partyData) do
     refreshMemberUI(name)
   end
@@ -783,13 +817,23 @@ function onMemberClick(widget, mousePos, mouseButton)
       end)
     end
 
-    -- Ignorar (VoIP Mute)
-    local isMuted = mutedPlayers[name]
-    menu:addOption(isMuted and ('Designorar ' .. name) or ('Ignorar ' .. name), function() 
-      togglePlayerMute(name)
-    end)
+    -- Mute local + Mute global (líder somente)
+    if not data.isLeader then
+      -- MUTE LOCAL: qualquer membro pode ignorar (líder é protegido, botão aparece desabilitado)
+      local isMuted = mutedPlayers[name]
+      menu:addOption(isMuted and ('Desfazer ignorar ' .. name) or ('Ignorar ' .. name), function()
+        togglePlayerMute(name)
+      end)
+    end
 
-    -- Passar Lideranca
+    if isLocalLeader() and not data.isLeader then
+      -- MUTE GLOBAL (só líder): silencia o membro para TODOS no servidor
+      menu:addOption('Mutar para todos: ' .. name, function()
+        muteGlobalMember(name)
+      end)
+    end
+
+    -- Passar Liderança
     if localPlayer and localPlayer:isPartyLeader() and not data.isLeader then
       menu:addOption('Passar lideranca para ' .. name, function() 
         if data.id and data.id > 0 then
@@ -863,8 +907,39 @@ function reportMember(name)
 end
 
 function togglePlayerMute(name)
+  local data = partyData[name]
+  if not data then return end
+  -- Líder nunca pode ser mutado localmente
+  if data.isLeader then
+    modules.game_textmessage.displayFailureMessage('O líder não pode ser ignorado.')
+    return
+  end
   mutedPlayers[name] = not mutedPlayers[name]
+  -- Notificar o servidor para bloquear/liberar relay deste ID para nós
+  sendToHelper({
+    type = 'MUTE_MEMBER',
+    targetId = data.id,
+    targetName = name,
+    muted = mutedPlayers[name]
+  })
   refreshMemberUI(name)
+end
+
+function muteGlobalMember(name)
+  -- Apenas o líder pode usar esta função (validado no servidor também)
+  if not isLocalLeader() then
+    modules.game_textmessage.displayFailureMessage('Apenas o líder pode mutar para todos.')
+    return
+  end
+  -- Mute global: ativa sala em modo silencioso (só líder fala)
+  local currentState = isGlobalMuted
+  sendToHelper({
+    type = 'GLOBAL_MUTE',
+    muted = not currentState
+  })
+  -- O estado real será atualizado quando o servidor enviar global_mute_changed
+  local msg = (not currentState) and 'Mute global ativado. Apenas você será ouvido.' or 'Mute global desativado.'
+  modules.game_textmessage.displayStatusMessage(msg)
 end
 
 function getDevices()

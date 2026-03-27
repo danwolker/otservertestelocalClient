@@ -282,11 +282,16 @@ function startPlayback() {
     ]);
 
     playbackProcess.stderr.on('data', (data) => {
-        console.error(`>> [VoIP Helper] Playback PS Stderr: ${data.toString()}`);
+        const msg = data.toString();
+        console.error(`>> [VoIP Helper] ERRO DE REPRODUÇÃO (PS stderr): ${msg}`);
+    });
+
+    playbackProcess.on('spawn', () => {
+        console.log(`>> [VoIP Helper] Processo PowerShell de áudio iniciado (PID: ${playbackProcess.pid}) para DeviceID: ${deviceId}`);
     });
 
     playbackProcess.on('close', (code) => {
-        console.log(`>> [VoIP Helper] Playback PS process exited with code: ${code}`);
+        console.log(`>> [VoIP Helper] Processo PowerShell de áudio encerrado (Código: ${code})`);
     });
 
     let audioOutput = {
@@ -328,6 +333,7 @@ function handleClientCommand(data, handlers) {
             console.log(`>> [VoIP Helper] SET_DEVICE received: ${data.deviceId} (type: ${typeof data.deviceId})`);
             if (typeof data.deviceId === 'number' || typeof data.deviceId === 'string') {
                 _state.preferredDeviceId = parseInt(data.deviceId);
+                if (handlers.setDevice) handlers.setDevice(data.deviceId);
             }
             return 'SET_DEVICE';
         case 'LIST_DEVICES_OUT':
@@ -337,6 +343,7 @@ function handleClientCommand(data, handlers) {
             console.log(`>> [VoIP Helper] SET_DEVICE_OUT received: ${data.deviceId} (type: ${typeof data.deviceId})`);
             if (typeof data.deviceId === 'number' || typeof data.deviceId === 'string') {
                 _state.preferredSpeakerId = parseInt(data.deviceId);
+                if (handlers.setDeviceOut) handlers.setDeviceOut(data.deviceId);
             }
             return 'SET_DEVICE_OUT';
         case 'START_TALK':
