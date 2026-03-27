@@ -127,68 +127,110 @@ MiniWindow
 
   MiniWindowContents
     Panel
-      id: muteHeader
+      id: vocationPanel
       anchors.top: parent.top
       anchors.left: parent.left
       anchors.right: parent.right
       height: 22
       background-color: #00000055
-      layout:
-        type: horizontalBox
-        spacing: 4
-        content-margins-left: 4
-        content-margins-top: 2
 
       VoipMuteButton
         id: Knight
+        anchors.top: parent.top
+        anchors.left: parent.left
+        width: 34
+        margin-top: 2
+        margin-left: 1
         !text: tr('Kni')
         !tooltip: tr('Mute Knights')
         @onClick: modules.game_voip.onMuteClick(self)
 
       VoipMuteButton
         id: Druid
+        anchors.top: parent.top
+        anchors.left: prev.right
+        width: 34
+        margin-top: 2
+        margin-left: 1
         !text: tr('Dru')
         !tooltip: tr('Mute Druids')
         @onClick: modules.game_voip.onMuteClick(self)
 
       VoipMuteButton
         id: Sorcerer
+        anchors.top: parent.top
+        anchors.left: prev.right
+        width: 34
+        margin-top: 2
+        margin-left: 1
         !text: tr('Sor')
         !tooltip: tr('Mute Sorcerers')
         @onClick: modules.game_voip.onMuteClick(self)
 
       VoipMuteButton
         id: Paladin
+        anchors.top: parent.top
+        anchors.left: prev.right
+        width: 34
+        margin-top: 2
+        margin-left: 1
         !text: tr('Pal')
         !tooltip: tr('Mute Paladins')
         @onClick: modules.game_voip.onMuteClick(self)
 
       VoipMuteButton
         id: Monk
+        anchors.top: parent.top
+        anchors.left: prev.right
+        anchors.right: parent.right
+        margin-top: 2
+        margin-left: 1
+        margin-right: 1
         !text: tr('Mnk')
         !tooltip: tr('Mute Monks')
         @onClick: modules.game_voip.onMuteClick(self)
 
+    Panel
+      id: controlPanel
+      anchors.top: prev.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      margin-top: 2
+      height: 22
+      background-color: #00000055
+
       VoipMuteButton
         id: All
-        !text: tr('ALL')
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.horizontalCenter
+        margin-top: 2
+        margin-left: 1
+        margin-right: 1
+        !text: tr('MUTE ALL')
         !tooltip: tr('Mute All')
         background-color: #444477
         @onClick: modules.game_voip.onMuteClick(self)
         $checked:
           background-color: #993333
 
-    Button
-      id: reportButton
-      !text: tr('REP')
-      !tooltip: tr('Report Party (Instant Replay)')
-      size: 28 18
-      background-color: #773333
-      border: 1 #ff6666
-      color: #ffffff
-      font: verdana-11px-monochrome
-      margin-left: 10
-      @onClick: modules.game_voip.sendReport()
+      Button
+        id: reportButton
+        anchors.top: parent.top
+        anchors.left: parent.horizontalCenter
+        anchors.right: parent.right
+        margin-top: 2
+        margin-left: 1
+        margin-right: 1
+        height: 18
+        !text: tr('REPORT')
+        !tooltip: tr('Report Party (Instant Replay)')
+        background-color: #773333
+        border: 1 #ff6666
+        color: #ffffff
+        font: verdana-11px-monochrome
+        text-align: center
+        @onClick: modules.game_voip.sendReport()
 
     HorizontalSeparator
       anchors.top: prev.bottom

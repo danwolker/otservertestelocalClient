@@ -746,24 +746,37 @@ function onMuteClick(widget)
   local checked = not widget:isChecked()
   widget:setChecked(checked)
 
+  local vocationPanel = voipWindow:recursiveGetChildById('vocationPanel')
+  local controlPanel = voipWindow:recursiveGetChildById('controlPanel')
+
   if id == "All" then
-    local header = voipWindow:recursiveGetChildById('muteHeader')
-    for _, child in ipairs(header:getChildren()) do
-      child:setChecked(checked)
-      mutedVocations[child:getId()] = checked
-    end
-  else
-    mutedVocations[id] = checked
-    local header = voipWindow:recursiveGetChildById('muteHeader')
-    local allChecked = true
-    for _, child in ipairs(header:getChildren()) do
-      if child:getId() ~= "All" and not child:isChecked() then
-        allChecked = false
-        break
+    -- Mutar todas as vocações e o próprio "All"
+    if vocationPanel then
+      for _, child in ipairs(vocationPanel:getChildren()) do
+        child:setChecked(checked)
+        mutedVocations[child:getId()] = checked
       end
     end
-    local allBtn = header:getChildById('All')
-    if allBtn then allBtn:setChecked(allChecked) end
+    mutedVocations["All"] = checked
+  else
+    -- Mute individual de vocação
+    mutedVocations[id] = checked
+    
+    -- Verificar se todas as vocações estão mutadas para marcar o "All"
+    local allChecked = true
+    if vocationPanel then
+      for _, child in ipairs(vocationPanel:getChildren()) do
+        if not child:isChecked() then
+          allChecked = false
+          break
+        end
+      end
+    end
+    
+    if controlPanel then
+      local allBtn = controlPanel:getChildById('All')
+      if allBtn then allBtn:setChecked(allChecked) end
+    end
     mutedVocations["All"] = allChecked
   end
 
