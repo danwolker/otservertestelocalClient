@@ -13,8 +13,28 @@ Services = {
   status = ""
 }
 
+-- Load .env file
+local env = {}
+if g_resources.fileExists("/.env") then
+  local content = g_resources.readFileContents("/.env")
+  for line in content:gmatch("[^\r\n]+") do
+    if not line:match("^%s*#") and line:match("=") then
+      local key, value = line:match("^%s*([^=]+)%s*=%s*(.*)%s*$")
+      if key and value then
+        env[key] = value:gsub("^['\"]", ""):gsub("['\"]$", "")
+      end
+    end
+  end
+end
+
+-- Monkey-patch os.getenv to support .env
+local oldGetEnv = os.getenv
+os.getenv = function(name)
+  return env[name] or oldGetEnv(name)
+end
+
 -- Servers accept http login url, websocket login url or ip:port:version
-local serverIp = os.getenv("OTCLIENT_IP") or "26.226.119.223"
+local serverIp = os.getenv("OTCLIENT_IP") or "127.0.0.1"
 g_logger.info(">> Login IP configured in init.lua: " .. serverIp)
 Servers = {
     LocalServer = serverIp .. ":7171:1098"
