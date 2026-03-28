@@ -15,3 +15,11 @@ UIWidget
   Label
     id: ping
     font: verdana-11px-rounded
+
+  Label
+    id: voipStatus
+    !text: tr('Voip: Desconectado')
+    font: verdana-11px-rounded
+    color: #ff0000
+    margin-top: 2
+    text-auto-resize: true

@@ -56,3 +56,20 @@ end
 function hide()
   ui:setVisible(false)
 end
+
+function updateVoipStatus(status)
+  if not ui then return end
+  local label = ui:recursiveGetChildById('voipStatus')
+  if not label then return end
+
+  if status == 'stable' then
+    label:setText('Voip: Conectado')
+    label:setColor('#00ff00')
+  elseif status == 'unstable' then
+    label:setText('Voip: Instavel')
+    label:setColor('#ff8800')
+  else
+    label:setText('Voip: Desconectado')
+    label:setColor('#ff0000')
+  end
+end

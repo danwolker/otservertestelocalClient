@@ -6,16 +6,16 @@ local OPCODE_VOIP = 200
 local OPCODE_SESSION = 210
 local OPCODE_SPEAKING = 201
 
-local VOCATION_NAMES = {
-  [0] = "None",
-  [1] = "Sorcerer",
-  [2] = "Druid",
-  [3] = "Paladin",
-  [4] = "Knight",
-  [5] = "Master Sorcerer",
-  [6] = "Elder Druid",
-  [7] = "Royal Paladin",
-  [8] = "Elite Knight",
+local VOCATION_INFO = {
+  [0] = { name = "None", color = "#888888", icon = "-" },
+  [1] = { name = "Sorcerer", color = "#8A2BE2", icon = "S" },
+  [2] = { name = "Druid", color = "#32CD32", icon = "D" },
+  [3] = { name = "Paladin", color = "#FFD700", icon = "P" },
+  [4] = { name = "Knight", color = "#C0C0C0", icon = "K" },
+  [5] = { name = "Master Sorcerer", color = "#8A2BE2", icon = "S" },
+  [6] = { name = "Elder Druid", color = "#32CD32", icon = "D" },
+  [7] = { name = "Royal Paladin", color = "#FFD700", icon = "P" },
+  [8] = { name = "Elite Knight", color = "#C0C0C0", icon = "K" },
 }
 
 -- Maps vocation id ranges to mute button ids
@@ -97,6 +97,9 @@ function init()
 
   -- Connect to Local VoIP Helper
   connectToHelper()
+  
+  -- Start speaking animation loop
+  cycleSpeakingAnimation()
 end
 
 function connectToHelper()
@@ -168,8 +171,17 @@ function connectToHelper()
     onClose = function()
       print(">> [VoIP] Local Helper disconnected.")
       helperWs = nil
+      -- Reset UI for all members
+      for name, _ in pairs(partyData) do
+        if partyData[name] then
+           partyData[name].status = 'offline'
+           refreshMemberUI(name)
+        end
+      end
+
       if not helperRetryEvent then
-        helperRetryEvent = scheduleEvent(connectToHelper, 5000)
+        print(">> [VoIP] Reconnecting in 3s...")
+        helperRetryEvent = scheduleEvent(connectToHelper, 3000)
       end
     end,
     onError = function(err)
@@ -180,11 +192,10 @@ function connectToHelper()
   local ok, res = pcall(function() return HTTP.webSocketJSON("ws://127.0.0.1:3002/", callbacks) end)
   if ok then
     helperWs = res
-    print(">> [VoIP] WebSocket request sent (checking connection status next...)")
+    if helperRetryEvent then removeEvent(helperRetryEvent) helperRetryEvent = nil end
   else
-    print(">> [VoIP] Failed to open WebSocket to Helper: " .. tostring(res))
     if not helperRetryEvent then
-      helperRetryEvent = scheduleEvent(connectToHelper, 5000)
+      helperRetryEvent = scheduleEvent(connectToHelper, 3000)
     end
   end
 end
@@ -225,7 +236,23 @@ function sendPingToHelper()
   if helperWs then
     sendToHelper({ type = 'ping' })
   end
+  updateGlobalStatus()
   scheduleEvent(sendPingToHelper, 5000)
+end
+
+function updateGlobalStatus()
+  local status = 'offline'
+  if helperWs and g_game.isOnline() then
+    local memberList = voipWindow:recursiveGetChildById('voipMemberList')
+    if memberList and memberList:getChildCount() > 0 then
+      status = 'stable'
+      -- Futuro: checar latência média para 'unstable'
+    end
+  end
+
+  if modules.game_stats and modules.game_stats.updateVoipStatus then
+    modules.game_stats.updateVoipStatus(status)
+  end
 end
 
 function sendReport()
@@ -356,7 +383,7 @@ function onVoipUpdate(protocol, opcode, buffer)
 
       print("[VoIP] Parsing member: " .. name .. " | ID: " .. id .. " | SpeakingRaw: " .. tostring(isSpeakingRaw) .. " | isSpeaking: " .. tostring(isSpeaking))
 
-      local vocName = VOCATION_NAMES[vocID] or "None"
+      local vocName = VOCATION_INFO[vocID] and VOCATION_INFO[vocID].name or "None"
       local outfit = {
         type   = tonumber(outfitparts[1]) or 0,
         head   = tonumber(outfitparts[2]) or 0,
@@ -394,6 +421,7 @@ function onVoipUpdate(protocol, opcode, buffer)
   if not voipUpdateEvent then
     voipUpdateEvent = scheduleEvent(updateBars, 500)
   end
+  updateGlobalStatus()
 end
 
 function onExtendedVoipSession(protocol, opcode, buffer)
@@ -415,7 +443,7 @@ function onExtendedVoipSession(protocol, opcode, buffer)
   local currentMembers = {}
   for _, member in ipairs(session.members) do
     local name = member.name
-    local vocName = VOCATION_NAMES[member.vocation] or "None"
+    local vocName = VOCATION_INFO[member.vocation] and VOCATION_INFO[member.vocation].name or "None"
     
     partyData[name] = { id = member.playerId, vocID = member.vocation, isLeader = member.isLeader }
     addMember(name, vocName, member.isLeader, nil, 100, 100)
@@ -437,6 +465,7 @@ function onExtendedVoipSession(protocol, opcode, buffer)
   if not voipUpdateEvent then
     voipUpdateEvent = scheduleEvent(updateBars, 500)
   end
+  updateGlobalStatus()
 
   -- Notify Helper about new session
   print(">> [VoIP] Session Join (JSON): " .. session.wsUrl .. " | Room: " .. session.roomId)
@@ -474,7 +503,7 @@ function onVoipSession(protocol, msg)
       mutedGlobal = msg:getU8() == 1
     }
     
-    local vocName = VOCATION_NAMES[member.vocation] or "None"
+    local vocName = VOCATION_INFO[member.vocation] and VOCATION_INFO[member.vocation].name or "None"
     
     partyData[name] = { id = member.playerId, vocID = member.vocation, isLeader = member.isLeader }
     addMember(name, vocName, member.isLeader, nil, 100, 100)
@@ -496,6 +525,7 @@ function onVoipSession(protocol, msg)
   if not voipUpdateEvent then
     voipUpdateEvent = scheduleEvent(updateBars, 500)
   end
+  updateGlobalStatus()
 
   -- Notify Helper about new session
   print(">> [VoIP] Session Join: " .. session.wsUrl .. " | Room: " .. session.roomId)
@@ -522,6 +552,7 @@ function clearMembers()
   if not voipWindow then return end
   local memberList = voipWindow:recursiveGetChildById('voipMemberList')
   if memberList then memberList:destroyChildren() end
+  updateGlobalStatus()
   local label = voipWindow:recursiveGetChildById('descriptionLabel')
   if label then
     label:setText(tr('No active call.'))
@@ -536,13 +567,17 @@ function addMember(name, vocation, isLeader, outfit, healthPercent, manaPercent)
   local widget = memberList:getChildById(name)
   if not widget then
     widget = g_ui.createWidget('VoipMember', memberList)
+    if not widget then
+      print(">> [VoIP] Erro: Falha ao criar widget VoipMember para " .. tostring(name))
+      return
+    end
     widget:setId(name)
   end
 
   local displayName = isLeader and (name .. " (L)") or name
   widget:getChildById('name'):setText(displayName)
   widget:getChildById('name'):setColor(isLeader and '#FFD700' or '#FFFFFF')
-  widget:getChildById('vocation'):setText(vocation)
+  widget:getChildById('vocationName'):setText(vocation)
   if outfit then widget:getChildById('creature'):setOutfit(outfit) end
   widget:getChildById('healthBar'):setValue(healthPercent, 0, 100)
   widget:getChildById('manaBar'):setValue(manaPercent, 0, 100)
@@ -568,40 +603,82 @@ function refreshMemberUI(name)
   -- O líder nunca aparece como mutado na UI, independente de qualquer flag
   if data.isLeader then isMutedLocally = false end
 
-  local indicator = widget:getChildById('voiceIndicator')
-  local status = data.status or 'offline'
-  local latency = data.latency or 0
-  local qualityWidget = widget:getChildById('connectionQuality')
-
-  -- Cor do indicador de qualidade de conexão
-  if status == 'online' then
-    if latency < 150 then
-      qualityWidget:setBackgroundColor('#00ff00')
-    elseif latency < 400 then
-      qualityWidget:setBackgroundColor('#ffa500')
-    else
-      qualityWidget:setBackgroundColor('#ff4500')
-    end
-  else
-    qualityWidget:setBackgroundColor('#ff0000')
+  local isSpeaking = data.isSpeaking
+  if name == g_game.getCharacterName() then
+    isSpeaking = pttPressed
   end
 
+  local statusBall = widget:getChildById('statusBall')
   if isMutedLocally then
-    indicator:setBackgroundColor('#ff0000') -- Vermelho: mutado
-    indicator:setVisible(true)
+    statusBall:setBackgroundColor('#ff0000') -- Red for muted
   elseif isGlobalMuted and not data.isLeader then
-    -- Sala em mute global: membro não-líder aparece como silenciado
-    indicator:setBackgroundColor('#888888') -- Cinza: mute global ativo
-    indicator:setVisible(true)
+    statusBall:setBackgroundColor('#888888') -- Gray for global mute
+  elseif isSpeaking then
+    statusBall:setBackgroundColor('#00ff00') -- Green for speaking
   else
-    -- Verde pulsando se está falando
-    local isSpeaking = data.isSpeaking
-    if name == g_game.getCharacterName() then
-      isSpeaking = pttPressed
-    end
-    indicator:setBackgroundColor('#00ff00')
-    indicator:setVisible(isSpeaking == true)
+    statusBall:setBackgroundColor('#444444') -- Dark gray for idle
   end
+
+  -- Vocação/Latência removido para design minimalista.
+end
+
+function cycleSpeakingAnimation()
+  scheduleEvent(cycleSpeakingAnimation, 100)
+  if not voipWindow or not voipWindow:isVisible() then return end
+
+  local memberList = voipWindow:recursiveGetChildById('voipMemberList')
+  if not memberList then return end
+
+  local time = g_clock.millis()
+  local alpha = math.sin(time / 150) * 0.3 + 0.7 -- Pulse between 0.4 and 1.0 opacity
+
+  for name, data in pairs(partyData) do
+    if data.isSpeaking or (name == g_game.getCharacterName() and pttPressed) then
+      local widget = memberList:getChildById(name)
+      if widget then
+        local statusBall = widget:getChildById('statusBall')
+        if statusBall:getBackgroundColor() == '#00ff00' then
+          statusBall:setOpacity(alpha)
+        else
+          statusBall:setOpacity(1.0)
+        end
+      end
+    end
+  end
+end
+
+function onVolumeChange(widget, value)
+  local memberWidget = widget:getParent()
+  local name = memberWidget:getId()
+  print("[VoIP] Changing volume for " .. name .. " to " .. value .. "%")
+  
+  -- Send to helper to adjust local gain for this stream
+  sendToHelper({ 
+    type = 'SET_VOLUME', 
+    targetPlayerId = partyData[name] and partyData[name].id or 0,
+    value = value 
+  })
+end
+
+function onIndividualMute(widget)
+  local memberWidget = widget:getParent()
+  local name = memberWidget:getId()
+  local checked = widget:isChecked()
+  
+  print("[VoIP] Local Mute " .. (checked and "ON" or "OFF") .. " for " .. name)
+  mutedPlayers[name] = checked
+  
+  -- Sincronizar com o servidor VoIP (para ele parar de enviar os pacotes para nós e economizar banda)
+  local protocol = g_game.getProtocolGame()
+  if protocol and partyData[name] then
+    sendToHelper({
+      type = 'mute_member',
+      targetPlayerId = partyData[name].id,
+      muted = checked
+    })
+  end
+  
+  refreshMemberUI(name)
 end
 
 function updatePttBinding()
