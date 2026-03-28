@@ -151,6 +151,10 @@ function startCapture(ctx) {
     const state = _getState();
     if (state.isTalking) return;
 
+    if (!ctx.mainVoipWs || ctx.mainVoipWs.readyState !== WebSocket.OPEN) {
+        console.warn('>> [VoIP Helper] startCapture: WebSocket principal não está conectado! Aguardando CONNECT do servidor...');
+    }
+
     if (state.captureMode === 'system') {
         startSystemAudio(
             (chunk) => sendPcmChunk(chunk, ctx.mainVoipWs, ctx.captureEncoder, WebSocket.OPEN),
@@ -177,7 +181,17 @@ function stopCapture(ctx) {
 function startMic(ctx) {
     console.log('>> [VoIP Helper] Iniciando captura de Microfone (PowerShell)...');
     startMicAudio(
-        (chunk) => sendPcmChunk(chunk, ctx.mainVoipWs, ctx.captureEncoder, WebSocket.OPEN),
+        (chunk) => {
+            // Acessa ctx.mainVoipWs em tempo de execução (não captura o valor antigo no closure)
+            if (!ctx.mainVoipWs || ctx.mainVoipWs.readyState !== WebSocket.OPEN) {
+                if (!ctx._lastWsWarnTime || Date.now() - ctx._lastWsWarnTime > 2000) {
+                    console.warn('>> [VoIP Helper] sendPcmChunk ignorado: WebSocket principal não está OPEN (state:', ctx.mainVoipWs?.readyState, ')');
+                    ctx._lastWsWarnTime = Date.now();
+                }
+                return;
+            }
+            sendPcmChunk(chunk, ctx.mainVoipWs, ctx.captureEncoder, WebSocket.OPEN);
+        },
         (e) => console.error('>> [VoIP Helper] Erro no microfone:', e)
     );
 }
