@@ -35,8 +35,10 @@ function calculateVolume(buffer) {
         sum += sample * sample;
     }
     const rms = Math.sqrt(sum / samples);
-    // Normalizar: 0 a 100 (ajustando sensitividade para 0-2000 RMS -> 0-100)
-    let level = Math.floor((rms / 2000) * 100);
+    // Normalizar: 0 a 100. 
+    // O valor 2000 é empírico para microfones comuns (16-bit PCM).
+    // Para microfones muito baixos ou altos, este valor pode ser ajustado.
+    let level = Math.floor((rms / 2500) * 100); 
     return Math.min(100, level);
 }
 

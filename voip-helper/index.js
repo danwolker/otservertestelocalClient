@@ -292,6 +292,13 @@ function connectToMainVoip(ctx, url, sessionKey) {
 
     ctx.mainVoipWs.on('close', (code, reason) => {
         console.log(`>> [VoIP Helper] Desconectado do Servidor Principal. Código: ${code}, Razão: ${reason.toString()}`);
+        if (ctx.localWs && ctx.localWs.readyState === WebSocket.OPEN) {
+            ctx.localWs.send(JSON.stringify({ 
+                type: 'STATUS_UPDATE', 
+                status: 'offline', 
+                members: [{ name: 'LOCAL_USER', status: 'offline' }] 
+            }));
+        }
     });
 
     ctx.mainVoipWs.on('error', (e) => {
