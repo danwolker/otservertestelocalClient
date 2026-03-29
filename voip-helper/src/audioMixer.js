@@ -2,7 +2,7 @@
 
 /**
  * AudioMixer - Gerencia a mixagem de múltiplos fluxos de áudio PCM 16-bit.
- * Resolve o problema de áudio picotado interpondo amostras em vez de tocar sequencialmente.
+ * Otimizado para alta performance e suporte a 30+ jogadores simultâneos.
  */
 class AudioMixer {
     constructor(onFrameMixed, options = {}) {
@@ -12,118 +12,160 @@ class AudioMixer {
         this.frameBytes = this.frameSize * this.channels * 2; // 16-bit = 2 bytes
         this.onFrameMixed = onFrameMixed;
         
-        // Map<playerId, Buffer>
-        this.playerBuffers = new Map();
-        // Map<playerId, lastActivityTime> para limpeza automática
+        // Map<playerId, Int16Array[]> - Fila de buffers para cada jogador
+        // Usamos uma array de frames para evitar o custo de concatenação de Buffers.
+        this.playerQueues = new Map();
+        
+        // Map<playerId, lastActivityTime> para limpeza automática de quem parou de falar
         this.lastActivity = new Map();
         
-        this.interval = null;
         this.isRunning = false;
+        this.nextTickTimeout = null;
+        this.expectedTickTime = 0;
         
         // Jitter Buffer: Mínimo de frames acumulados antes de começar a mixar um player
-        // 3 frames = ~60ms de latência extra, mas áudio muito mais estável
+        // 4 frames = ~80ms de latência extra, ideal para internet brasileira estável
         this.jitterFrames = options.jitterFrames || 4; 
-        this.playerStarted = new Map(); // playerId -> boolean (se já passou do jitter)
+        this.playerStarted = new Map(); // playerId -> boolean
+
+        // Buffer de mixagem intermediário pré-alocado usando Int32 para evitar overflow durante a soma
+        this.mixBuffer = new Int32Array(this.frameSize * this.channels);
+        
+        // Buffer de saída final compatível com .write() do Node.js
+        this.outputBuffer = Buffer.allocUnsafe(this.frameBytes);
     }
 
+    /**
+     * Inicia o loop de processamento do áudio com precisão de tempo corrigida.
+     */
     start() {
         if (this.isRunning) return;
         this.isRunning = true;
-        console.log(`>> [VoIP Mixer] Mixer iniciado (Intervalo: ${this.frameSize / (this.sampleRate / 1000)}ms)`);
+        this.expectedTickTime = Date.now();
+        this.scheduleNextTick();
+        console.log(`>> [VoIP Mixer] Mixer de Alta Performance iniciado (Frame: 20ms | 48kHz)`);
+    }
+
+    /**
+     * Agenda o próximo processamento compensando atrasos do event loop.
+     */
+    scheduleNextTick() {
+        if (!this.isRunning) return;
         
-        // Usamos um loop de alta frequência ou setInterval estável
-        this.interval = setInterval(() => this.tick(), (this.frameSize / this.sampleRate) * 1000);
+        const frameDuration = (this.frameSize / this.sampleRate) * 1000;
+        this.expectedTickTime += frameDuration;
+        
+        const delay = Math.max(0, this.expectedTickTime - Date.now());
+        this.nextTickTimeout = setTimeout(() => this.tick(), delay);
     }
 
     stop() {
         this.isRunning = false;
-        if (this.interval) {
-            clearInterval(this.interval);
-            this.interval = null;
+        if (this.nextTickTimeout) {
+            clearTimeout(this.nextTickTimeout);
+            this.nextTickTimeout = null;
         }
-        this.playerBuffers.clear();
+        this.playerQueues.clear();
         this.lastActivity.clear();
         this.playerStarted.clear();
         console.log('>> [VoIP Mixer] Mixer parado.');
     }
 
     /**
-     * Adiciona áudio decodificado de um jogador específico ao buffer de mixagem.
+     * Adiciona áudio decodificado de um jogador.
+     * Converte o Buffer em TypedArray imediatamente para acesso rápido.
      */
     addAudio(playerId, pcmBuffer) {
         if (!this.isRunning) this.start();
 
-        let buf = this.playerBuffers.get(playerId) || Buffer.alloc(0);
-        this.playerBuffers.set(playerId, Buffer.concat([buf, pcmBuffer]));
+        // Mapeia o Buffer p/ Int16Array sem copiar dados se possível
+        const samples = new Int16Array(
+            pcmBuffer.buffer, 
+            pcmBuffer.byteOffset, 
+            pcmBuffer.length / 2
+        );
+        
+        let queue = this.playerQueues.get(playerId);
+        if (!queue) {
+            queue = [];
+            this.playerQueues.set(playerId, queue);
+        }
+        
+        // Adiciona à fila do jogador específico
+        queue.push(samples);
         this.lastActivity.set(playerId, Date.now());
 
-        // Se o buffer atingir o limite do jitter, marcamos como pronto para tocar
+        // Controle de Jitter Buffer
         if (!this.playerStarted.get(playerId)) {
-            if (this.playerBuffers.get(playerId).length >= this.frameBytes * this.jitterFrames) {
+            if (queue.length >= this.jitterFrames) {
                 this.playerStarted.set(playerId, true);
             }
         }
     }
 
+    /**
+     * Loop principal de mixagem matemática.
+     */
     tick() {
-        const activePlayers = [];
-        const now = Date.now();
+        if (!this.isRunning) return;
 
-        // 1. Identificar jogadores que têm áudio pronto para tocar
-        for (const [playerId, buffer] of this.playerBuffers.entries()) {
-            // Limpeza de jogadores inativos há mais de 5 segundos
+        const now = Date.now();
+        const activePlayers = [];
+
+        // 1. Identificar jogadores ativos e descartar quem expirou (silencioso por > 5s)
+        for (const [playerId, queue] of this.playerQueues.entries()) {
             if (now - this.lastActivity.get(playerId) > 5000) {
-                this.playerBuffers.delete(playerId);
+                this.playerQueues.delete(playerId);
                 this.lastActivity.delete(playerId);
                 this.playerStarted.delete(playerId);
                 continue;
             }
 
-            if (this.playerStarted.get(playerId) && buffer.length >= this.frameBytes) {
+            if (this.playerStarted.get(playerId) && queue.length > 0) {
                 activePlayers.push(playerId);
             }
         }
 
-        // Se ninguém está falando, não enviamos nada para economizar recursos ou enviamos silêncio?
-        // Para manter o script PowerShell "quente" e sincronizado, enviamos silêncio se houve atividade recente.
+        // Se ninguém está transmitindo áudio, agendamos o próximo tick e saímos
         if (activePlayers.length === 0) {
-            if (this.playerBuffers.size > 0) {
-                // Opcional: enviar frame de silêncio para manter o fluxo
-                // this.onFrameMixed(Buffer.alloc(this.frameBytes));
-            }
+            this.scheduleNextTick();
             return;
         }
 
-        // 2. Mixagem Matemática
-        const mixedBuffer = Buffer.alloc(this.frameBytes);
+        // 2. Mixagem Matemática usando Int32Array (V8 otimiza este loop)
+        this.mixBuffer.fill(0);
         
-        for (let i = 0; i < this.frameSize; i++) {
-            let sum = 0;
-            const offset = i * 2;
-
-            for (const playerId of activePlayers) {
-                const buf = this.playerBuffers.get(playerId);
-                const sample = buf.readInt16LE(offset);
-                sum += sample;
-            }
-
-            // Clamping para evitar distorção (clipping)
-            if (sum > 32767) sum = 32767;
-            if (sum < -32768) sum = -32768;
-
-            mixedBuffer.writeInt16LE(sum, offset);
-        }
-
-        // 3. Consumir os frames dos buffers utilizados
         for (const playerId of activePlayers) {
-            const buf = this.playerBuffers.get(playerId);
-            this.playerBuffers.set(playerId, buf.slice(this.frameBytes));
+            const queue = this.playerQueues.get(playerId);
+            const playerFrame = queue.shift(); // Extrai o frame mais antigo
+            
+            for (let i = 0; i < this.mixBuffer.length; i++) {
+                this.mixBuffer[i] += playerFrame[i];
+            }
         }
 
-        // 4. Enviar áudio mixado para o playback
-        if (this.onFrameMixed) {
-            this.onFrameMixed(mixedBuffer);
+        // 3. Ganho Adaptativo e Conversão de Volta para 16-bit
+        // numSpeakers > 1 ? reduzimos o ganho p/ evitar clipping agressivo
+        const numSpeakers = activePlayers.length;
+        const scale = numSpeakers > 1 ? 1 / Math.sqrt(numSpeakers) : 1;
+
+        for (let i = 0; i < this.mixBuffer.length; i++) {
+            let sample = this.mixBuffer[i] * scale;
+            
+            // Limitador (Clamping)
+            if (sample > 32767) sample = 32767;
+            else if (sample < -32768) sample = -32768;
+            
+            this.outputBuffer.writeInt16LE(sample, i * 2);
         }
+
+        // 4. Despacha o áudio mixado para o sistema de som via stdout/stdin
+        if (this.onFrameMixed) {
+            this.onFrameMixed(this.outputBuffer);
+        }
+
+        // Agenda o próximo frame considerando o drift
+        this.scheduleNextTick();
     }
 }
 
