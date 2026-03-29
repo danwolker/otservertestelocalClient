@@ -52,10 +52,17 @@ class AudioMixer {
     scheduleNextTick() {
         if (!this.isRunning) return;
         
-        const frameDuration = (this.frameSize / this.sampleRate) * 1000;
-        this.expectedTickTime += frameDuration;
+        const frameDurationMs = (this.frameSize / this.sampleRate) * 1000;
+        const now = Date.now();
         
-        const delay = Math.max(0, this.expectedTickTime - Date.now());
+        // Se estamos atrasados demais (mais de 100ms), "zeramos" o tempo base p/ evitar avalanche de ticks
+        if (now - this.expectedTickTime > 100) {
+            this.expectedTickTime = now;
+        }
+
+        this.expectedTickTime += frameDurationMs;
+        const delay = Math.max(0, this.expectedTickTime - now);
+        
         this.nextTickTimeout = setTimeout(() => this.tick(), delay);
     }
 
@@ -95,7 +102,14 @@ class AudioMixer {
         queue.push(samples);
         this.lastActivity.set(playerId, Date.now());
 
-        // Controle de Jitter Buffer
+        // Controle de Jitter Buffer (Catch-up inteligente)
+        // Se a fila passar de 5 frames (~100ms), descartamos o frame MAIS ANTIGO para manter o tempo real.
+        // É melhor perder 20ms de áudio do que ficar com lag acumulado para sempre.
+        const MAX_QUEUE = Math.max(8, this.jitterFrames * 2);
+        if (queue.length > MAX_QUEUE) {
+            queue.shift(); // Descarta o frame que já passou
+        }
+
         if (!this.playerStarted.get(playerId)) {
             if (queue.length >= this.jitterFrames) {
                 this.playerStarted.set(playerId, true);
@@ -105,14 +119,42 @@ class AudioMixer {
 
     /**
      * Loop principal de mixagem matemática.
+     * Implementa lógica Anti-Drift: processa múltiplos frames se houver atraso.
      */
     tick() {
         if (!this.isRunning) return;
 
         const now = Date.now();
+        const frameDurationMs = (this.frameSize / this.sampleRate) * 1000;
+        let processedCount = 0;
+
+        // Se o atraso for crítico (mais de 500ms), fazemos um resync para evitar "metralhadora" de áudio
+        if (now - this.expectedTickTime > 500) {
+            console.warn(`>> [VoIP Mixer] Drifting detectado (${now - this.expectedTickTime}ms). Fazendo resync...`);
+            this.expectedTickTime = now;
+        }
+
+        // Loop de Catch-up: Enquanto o tempo real estiver à frente do esperado, processamos o áudio.
+        // Limitamos a 5 frames por tick para não causar picos de CPU se o sistema travar muito.
+        while (now >= this.expectedTickTime && processedCount < 5) {
+            this.processSingleFrame();
+            this.expectedTickTime += frameDurationMs;
+            processedCount++;
+        }
+
+        // Agenda o próximo tick com base no tempo corrigido (Anti-Drift)
+        const nextDelay = Math.max(0, this.expectedTickTime - Date.now());
+        this.nextTickTimeout = setTimeout(() => this.tick(), nextDelay);
+    }
+
+    /**
+     * Mixagem de um único frame de 20ms.
+     */
+    processSingleFrame() {
+        const now = Date.now();
         const activePlayers = [];
 
-        // 1. Identificar jogadores ativos e descartar quem expirou (silencioso por > 5s)
+        // 1. Identificar jogadores ativos
         for (const [playerId, queue] of this.playerQueues.entries()) {
             if (now - this.lastActivity.get(playerId) > 5000) {
                 this.playerQueues.delete(playerId);
@@ -126,46 +168,39 @@ class AudioMixer {
             }
         }
 
-        // Se ninguém está transmitindo áudio, agendamos o próximo tick e saímos
-        if (activePlayers.length === 0) {
-            this.scheduleNextTick();
-            return;
-        }
+        if (activePlayers.length === 0) return;
 
-        // 2. Mixagem Matemática usando Int32Array (V8 otimiza este loop)
+        // 2. Mixagem Matemática
         this.mixBuffer.fill(0);
         
         for (const playerId of activePlayers) {
             const queue = this.playerQueues.get(playerId);
-            const playerFrame = queue.shift(); // Extrai o frame mais antigo
+            const playerFrame = queue.shift();
             
-            for (let i = 0; i < this.mixBuffer.length; i++) {
-                this.mixBuffer[i] += playerFrame[i];
+            if (playerFrame && playerFrame.length === this.mixBuffer.length) {
+                for (let i = 0; i < this.mixBuffer.length; i++) {
+                    this.mixBuffer[i] += playerFrame[i];
+                }
             }
         }
 
-        // 3. Ganho Adaptativo e Conversão de Volta para 16-bit
-        // numSpeakers > 1 ? reduzimos o ganho p/ evitar clipping agressivo
+        // 3. Ganho Logarítmico (Balanceado para múltiplos speakers)
         const numSpeakers = activePlayers.length;
-        const scale = numSpeakers > 1 ? 1 / Math.sqrt(numSpeakers) : 1;
+        const scale = numSpeakers > 1 ? (1 / Math.log2(numSpeakers + 1)) : 1;
 
         for (let i = 0; i < this.mixBuffer.length; i++) {
             let sample = this.mixBuffer[i] * scale;
             
-            // Limitador (Clamping)
             if (sample > 32767) sample = 32767;
             else if (sample < -32768) sample = -32768;
             
             this.outputBuffer.writeInt16LE(sample, i * 2);
         }
 
-        // 4. Despacha o áudio mixado para o sistema de som via stdout/stdin
+        // 4. Output
         if (this.onFrameMixed) {
             this.onFrameMixed(this.outputBuffer);
         }
-
-        // Agenda o próximo frame considerando o drift
-        this.scheduleNextTick();
     }
 }
 
