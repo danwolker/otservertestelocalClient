@@ -14,16 +14,52 @@ function UIScrollArea:onStyleApply(styleName, styleNode)
   for name,value in pairs(styleNode) do
     if name == 'vertical-scrollbar' then
       addEvent(function()
+        local scrollbar
         local parent = self:getParent()
         if parent then
-          self:setVerticalScrollBar(parent:getChildById(value))
+          scrollbar = parent:getChildById(value)
+          if not scrollbar then
+            local grandParent = parent:getParent()
+            if grandParent then
+              scrollbar = grandParent:getChildById(value)
+            end
+          end
+        end
+
+        if not scrollbar then
+          local root = self:getRootParent()
+          if root then
+            scrollbar = root:recursiveGetChildById(value)
+          end
+        end
+
+        if scrollbar then
+            self:setVerticalScrollBar(scrollbar)
         end
       end)
     elseif name == 'horizontal-scrollbar' then
       addEvent(function()
+        local scrollbar
         local parent = self:getParent()
         if parent then
-          self:setHorizontalScrollBar(self:getParent():getChildById(value))
+          scrollbar = parent:getChildById(value)
+          if not scrollbar then
+            local grandParent = parent:getParent()
+            if grandParent then
+              scrollbar = grandParent:getChildById(value)
+            end
+          end
+        end
+
+        if not scrollbar then
+          local root = self:getRootParent()
+          if root then
+            scrollbar = root:recursiveGetChildById(value)
+          end
+        end
+
+        if scrollbar then
+            self:setHorizontalScrollBar(scrollbar)
         end
       end)
     elseif name == 'inverted-scroll' then
@@ -72,6 +108,8 @@ function UIScrollArea:updateScrollBars()
 end
 
 function UIScrollArea:setVerticalScrollBar(scrollbar)
+  if not scrollbar then return end
+  self:updateScrollBars()
   self.verticalScrollBar = scrollbar
   connect(self.verticalScrollBar, 'onValueChange', function(scrollbar, value)
     local virtualOffset = self:getVirtualOffset()
@@ -83,6 +121,8 @@ function UIScrollArea:setVerticalScrollBar(scrollbar)
 end
 
 function UIScrollArea:setHorizontalScrollBar(scrollbar)
+  if not scrollbar then return end
+  self:updateScrollBars()
   self.horizontalScrollBar = scrollbar
   connect(self.horizontalScrollBar, 'onValueChange', function(scrollbar, value)
     local virtualOffset = self:getVirtualOffset()

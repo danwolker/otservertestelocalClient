@@ -1082,3 +1082,15 @@ end
 function stopTest()
   sendToHelper({ type = 'TEST_STOP' })
 end
+
+function setMicGain(value)
+  sendToHelper({ type = 'SET_MIC_GAIN', value = value })
+end
+
+function setSpeakerVolume(value)
+  sendToHelper({ type = 'SET_SPEAKER_VOLUME', value = value })
+end
+
+function setInputProfile(profile)
+  sendToHelper({ type = 'SET_INPUT_PROFILE', value = profile })
+end

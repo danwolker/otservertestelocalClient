@@ -68,7 +68,10 @@ local defaultOptions = {
   
   antialiasing = true,
   autoExit = false,
-  micSensitivity = 10
+  micSensitivity = 10,
+  micGain = 100,
+  speakerVolume = 100,
+  inputProfile = 'studio'
 }
 
 local optionsWindow
@@ -101,7 +104,7 @@ function init()
   optionsWindow:hide()
 
   optionsTabBar = optionsWindow:getChildById('optionsTabBar')
-  optionsTabBar:setContentWidget(optionsWindow:getChildById('optionsTabContent'))
+  optionsTabBar:setContentWidget(optionsWindow:recursiveGetChildById('optionsScrollArea'))
 
   g_keyboard.bindKeyDown('Ctrl+Shift+F', function() toggleOption('fullscreen') end)
   g_keyboard.bindKeyDown('Ctrl+N', toggleDisplays)
@@ -119,13 +122,13 @@ function init()
   optionsTabBar:addTab(tr('Graphics'), graphicsPanel, '/images/optionstab/graphics')
 
   audioPanel = g_ui.loadUI('audio')
-  local voiceActivity = audioPanel:getChildById('voiceActivity')
-  if voiceActivity then
-    voiceActivity:setMinimum(0)
-    voiceActivity:setMaximum(100)
-    voiceActivity:setValue(0)
-  end
   optionsTabBar:addTab(tr('Audio'), audioPanel, '/images/optionstab/audio')
+  
+  local profileCombo = audioPanel:getChildById('inputProfile')
+  if profileCombo then
+    profileCombo:addOption(tr('Estudio (Audio Puro)'), 'studio')
+    profileCombo:addOption(tr('Isolamento de Voz'), 'isolation')
+  end
 
 
   extrasPanel = g_ui.createWidget('OptionPanel')
@@ -141,6 +144,19 @@ function init()
 
   customPanel = g_ui.loadUI('custom')
   optionsTabBar:addTab(tr('Custom'), customPanel, '/images/optionstab/features')
+
+  optionsTabBar.onTabChange = function(tabBar, tab)
+    local panel = tab.tabPanel
+    if tab:getText() == tr('Audio') then
+      panel:setHeight(520)
+      panel:removeAnchor(AnchorBottom)
+    end
+    -- Garantir que a área de rolagem perceba a mudança de tamanho do filho
+    local scrollArea = optionsWindow:recursiveGetChildById('optionsScrollArea')
+    if scrollArea then
+       addEvent(function() scrollArea:updateScrollBars() end)
+    end
+  end
 
   optionsButton = modules.client_topmenu.addLeftButton('optionsButton', tr('Options'), '/images/topbuttons/options', toggle)
   audioButton = modules.client_topmenu.addLeftButton('audioButton', tr('Audio'), '/images/topbuttons/audio', function() toggleOption('enableAudio') end)
@@ -161,6 +177,7 @@ function terminate()
   g_keyboard.unbindKeyDown('Ctrl+Shift+F')
   g_keyboard.unbindKeyDown('Ctrl+N')
   if isTestingAudio then
+    print(">> [VoIP] Terminate: Stopping active audio test.")
     testAudio()
   end
   optionsWindow:destroy()
@@ -214,6 +231,7 @@ end
 
 function hide()
   if isTestingAudio then
+    print(">> [VoIP] Hide: Stopping active audio test.")
     testAudio()
   end
   optionsWindow:hide()
@@ -376,6 +394,14 @@ function setOption(key, value, force)
     if modules.game_voip then
       modules.game_voip.setSensitivity(value)
     end
+  elseif key == 'micGain' then
+    audioPanel:getChildById('micVolumeLabel'):setText(tr('Mic Volume: %d%%', value))
+    if modules.game_voip then modules.game_voip.setMicGain(value) end
+  elseif key == 'speakerVolume' then
+    audioPanel:getChildById('speakerVolumeLabel'):setText(tr('Speaker Volume: %d%%', value))
+    if modules.game_voip then modules.game_voip.setSpeakerVolume(value) end
+  elseif key == 'inputProfile' then
+    if modules.game_voip then modules.game_voip.setInputProfile(value) end
   end
 
   -- change value for keybind updates
@@ -507,33 +533,55 @@ function setSpeaker(name, deviceId)
 end
 
 function testAudio()
-  if not modules.game_voip then return end
+  if not modules.game_voip or not audioPanel then return end
   
+  local testSection = audioPanel:getChildById('testSection')
+  if not testSection then return end
+
+  local testButton = testSection:getChildById('testAudio')
+  local voiceActivity = testSection:getChildById('voiceActivity')
+  if not testButton or not voiceActivity then return end
+
   isTestingAudio = not isTestingAudio
-  local testButton = audioPanel:getChildById('testAudio')
-  local voiceActivity = audioPanel:getChildById('voiceActivity')
-  local voiceActivityLabel = audioPanel:getChildById('voiceActivityLabel')
   
   if isTestingAudio then
     testButton:setText(tr('Stop Test'))
     voiceActivity:setVisible(true)
-    voiceActivityLabel:setVisible(true)
-    print(">> [VoIP] Starting Audio Test...")
     modules.game_voip.startTest()
   else
     testButton:setText(tr('Test Microphone'))
     voiceActivity:setVisible(false)
-    voiceActivityLabel:setVisible(false)
-    voiceActivity:setValue(0)
-    print(">> [VoIP] Stopping Audio Test.")
+    voiceActivity:setValue(0, 0, 100)
     modules.game_voip.stopTest()
   end
 end
 
 function updateVoiceActivity(level)
   if not audioPanel or not isTestingAudio then return end
-  local voiceActivity = audioPanel:getChildById('voiceActivity')
+  local testSection = audioPanel:getChildById('testSection')
+  if not testSection then return end
+  
+  local voiceActivity = testSection:getChildById('voiceActivity')
   if voiceActivity then
-    voiceActivity:setValue(level)
+    voiceActivity:setValue(level, 0, 100)
+    
+    local r, g = 0, 255
+    if level < 50 then
+      r = 255
+      g = math.floor(255 * (level / 50))
+    else
+      r = math.floor(255 * (1 - (level - 50) / 50))
+      g = 255
+    end
+    
+    local color = string.format("#%02X%02X00", r, g)
+    voiceActivity:setImageColor(color)
+    
+    local sensitivity = options['micSensitivity'] or 10
+    if level < sensitivity then
+      voiceActivity:setOpacity(0.5) -- Dimmer when below gate
+    else
+      voiceActivity:setOpacity(1.0)
+    end
   end
 end

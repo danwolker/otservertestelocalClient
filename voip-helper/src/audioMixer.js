@@ -79,6 +79,18 @@ class AudioMixer {
     }
 
     /**
+     * Limpa a fila de áudio de um jogador específico.
+     * Útil para parar o teste de áudio instantaneamente (sem eco residual).
+     */
+    clearQueue(playerId) {
+        if (this.playerQueues.has(playerId)) {
+            this.playerQueues.delete(playerId);
+            this.playerStarted.delete(playerId);
+            console.log(`>> [VoIP Mixer] Fila de áudio limpa para player ID: ${playerId}`);
+        }
+    }
+
+    /**
      * Adiciona áudio decodificado de um jogador.
      * Converte o Buffer em TypedArray imediatamente para acesso rápido.
      */

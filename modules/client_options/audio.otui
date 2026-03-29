@@ -1,4 +1,6 @@
 OptionPanel
+  height: 520
+
   OptionCheckBox
     id: enableAudio
     !text: tr('Enable audio')
@@ -74,30 +76,75 @@ OptionPanel
     maximum: 100
     @onValueChange: modules.client_options.setOption('micSensitivity', self:getValue())
 
-  Button
-    id: testAudio
-    !text: tr('Test Microphone')
-    margin-top: 15
-    margin-right: 40
-    margin-left: 40
-    @onClick: modules.client_options.testAudio()
+  Label
+    id: micVolumeLabel
+    !text: tr('Mic Volume: %d%%', 100)
+    margin-top: 10
+    @onSetup: |
+      local value = modules.client_options.getOption('micGain')
+      self:setText(tr('Mic Volume: %d%%', value))
+
+  OptionScrollbar
+    id: micGain
+    margin-top: 3
+    minimum: 0
+    maximum: 200
+    @onValueChange: modules.client_options.setOption('micGain', self:getValue())
 
   Label
-    id: voiceActivityLabel
-    !text: tr('Voice Activity:')
+    id: speakerVolumeLabel
+    !text: tr('Speaker Volume: %d%%', 100)
     margin-top: 10
-    visible: false
+    @onSetup: |
+      local value = modules.client_options.getOption('speakerVolume')
+      self:setText(tr('Speaker Volume: %d%%', value))
 
-  ProgressBar
-    id: voiceActivity
+  OptionScrollbar
+    id: speakerVolume
     margin-top: 3
-    margin-right: 10
-    margin-left: 10
-    height: 15
-    background-color: #555555
-    image-source: /images/ui/progressbar
-    image-color: #00FF00
-    visible: false
     minimum: 0
     maximum: 100
-    value: 0
+    @onValueChange: modules.client_options.setOption('speakerVolume', self:getValue())
+
+  Label
+    id: inputProfileLabel
+    !text: tr('Input Profile:')
+    margin-top: 10
+
+  ComboBox
+    id: inputProfile
+    margin-top: 3
+    margin-right: 2
+    margin-left: 2
+    @onOptionChange: modules.client_options.setOption('inputProfile', self:getCurrentOption().data)
+
+  Panel
+    id: testSection
+    height: 30
+    margin-top: 20
+    margin-bottom: 30
+
+    Button
+      id: testAudio
+      !text: tr('Test Microphone')
+      width: 140
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      @onClick: modules.client_options.testAudio()
+
+    ProgressBar
+      id: voiceActivity
+      height: 20
+      background-color: #1a1b1e
+      image-source: /images/ui/progressbar
+      visible: false
+      minimum: 0
+      maximum: 100
+      value: 0
+      anchors.left: testAudio.right
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      margin-left: 10
+      padding: 1
+
+

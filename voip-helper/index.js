@@ -137,6 +137,7 @@ wss.on('connection', (ws) => {
 
     ws.on('close', () => {
         console.log('>> [VoIP Helper] OTClient desconectado.');
+        stopAudioTest(clientCtx);
         stopCapture(clientCtx);
         if (clientCtx.mainVoipWs) clientCtx.mainVoipWs.close();
         if (clientCtx.statusInterval) {
@@ -254,26 +255,42 @@ async function sendDeviceListOut(ctx) {
 // 4b. Teste de Áudio (Loopback)
 // ────────────────────────────────────────
 function startAudioTest(ctx) {
-    console.log('>> [VoIP Helper] Iniciando Teste de Áudio (Loopback)...');
+    console.log('>> [VoIP Helper] Iniciando Teste de Áudio (Loopback via Mixer)...');
     if (ctx.testAudioInput) stopAudioTest(ctx);
     
-    // Garantir que temos um speaker ativo para o teste
+    // Garantir que temos um speaker ativo e mixer rodando
     if (!ctx.speaker) ctx.speaker = startPlayback();
+    if (ctx.mixer && !ctx.mixer.isRunning) {
+        ctx.mixer.start();
+    }
+
+    // ID fictício para o teste local para que o mixer o diferencie de outros players
+    const TEST_PLAYER_ID = 999999;
 
     ctx.testAudioInput = startMicAudio(
         (chunk) => {
-            if (ctx.speaker) ctx.speaker.write(chunk);
+            if (ctx.mixer) {
+                ctx.mixer.addAudio(TEST_PLAYER_ID, chunk);
+            }
         },
-        (e) => console.error('>> [VoIP Helper] Erro no teste de áudio:', e)
+        (e) => console.error('>> [VoIP Helper] Erro no teste de áudio:', e),
+        true // Bypass Noise Gate durante o teste (Permite ouvir qualidade real e ruídos de fundo)
     );
 }
-// Nota: O teste usa PCM direto no Speaker, sem passar pelo Opus.
+// Nota: O teste agora usa o Mixer para garantir sincronia e remover stuttering (anti-jitter).
 
 function stopAudioTest(ctx) {
     console.log('>> [VoIP Helper] Parando Teste de Áudio.');
     if (ctx.testAudioInput) {
         try { ctx.testAudioInput.quit(); } catch (_) {}
         ctx.testAudioInput = null;
+    }
+    
+    // Limpar imediatamente a fila do mixer para evitar reverberação/eco
+    if (ctx.mixer) {
+        ctx.mixer.clearQueue(999999);
+    } else {
+        console.warn('>> [VoIP Helper] Mixer não encontrado ao parar teste.');
     }
 }
 

@@ -28,6 +28,7 @@ MainWindow
     anchors.top: parent.top
     anchors.left: parent.left
     anchors.bottom: parent.bottom
+    margin-bottom: 40
 
   Panel
     id: optionsTabContent
@@ -35,8 +36,23 @@ MainWindow
     anchors.left: optionsTabBar.right
     anchors.right: parent.right
     anchors.bottom: optionsTabBar.bottom
+    margin-bottom: 8
     margin-left: 10
     margin-top: 3
+
+    ScrollablePanel
+      id: optionsScrollArea
+      anchors.fill: parent
+      vertical-scrollbar: optionsScrollbar
+      margin-right: 15
+
+  VerticalScrollBar
+    id: optionsScrollbar
+    anchors.top: optionsTabContent.top
+    anchors.bottom: optionsTabContent.bottom
+    anchors.right: parent.right
+    step: 14
+    pixels-scroll: true
 
   Button
     !text: tr('Ok')
