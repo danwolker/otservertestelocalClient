@@ -1,7 +1,6 @@
-'use strict';
-
 const { spawn, execSync, exec } = require('child_process');
 const path = require('path');
+const { Rnnoise } = require('@shiguredo/rnnoise-wasm');
 
 // ────────────────────────────────────────
 // Configurações de Áudio
@@ -25,6 +24,10 @@ let _state = {
     pcmBuffer: Buffer.alloc(0),
     voiceLevel: 0,
     sensitivity: 10,
+    denoiseEnabled: true,       // Filtro Inteligente (RNNoise)
+    rnnoise: null,              // Módulo RNNoise carregado
+    denoiseState: null,         // Estado da RNN para o microfone
+    denoiseBuffer: Buffer.alloc(0), // Buffer para alinhar frames de 480 samples
     micGain: 100,               // 100 = real (1.0x), 200 = 2.0x, etc.
     speakerVolume: 100,         // Master volume para o que ouvimos
     inputProfile: 'studio',     // 'studio' | 'isolation'
@@ -54,7 +57,7 @@ function calculateVolume(buffer) {
     }
     const rms = Math.sqrt(sum / samples);
     // Sensibilidade aumentada: 500 é muito mais sensível para garantir detecção
-    let level = Math.floor((rms / 500) * 100); 
+    let level = Math.floor((rms / 500) * 100);
     return Math.min(100, level);
 }
 
@@ -103,10 +106,10 @@ function listAudioDevices() {
                 console.error(`>> [VoIP Helper] Erro ao listar microfones (PowerShell): ${error.message}`);
                 return resolve([]);
             }
-            
+
             const devices = [];
             const lines = stdout.split('\n');
-            
+
             for (const line of lines) {
                 const match = line.match(/Device (\d+): (.+)/);
                 if (match) {
@@ -140,7 +143,7 @@ function sendPcmChunk(chunk, ws, opus, wsOpen) {
             const encoded = opus.encode(frame);
             ws.send(encoded);
             framesSent++;
-            
+
             // Log transmission once every 2 seconds to confirm it's working
             if (!_state.lastSendLogTime || Date.now() - _state.lastSendLogTime > 2000) {
                 console.log(`>> [VoIP Helper] Opus frame sent to main server (${encoded.length} bytes)`);
@@ -154,40 +157,104 @@ function sendPcmChunk(chunk, ws, opus, wsOpen) {
     return framesSent;
 }
 
+/**
+ * Inicializa o módulo de supressão de ruído RNNoise.
+ */
+async function initDenoise() {
+    if (_state.rnnoise) return;
+    try {
+        console.log('>> [VoIP Helper] Carregando módulo RNNoise (Machine Learning)...');
+        _state.rnnoise = await Rnnoise.load();
+        _state.denoiseState = _state.rnnoise.createDenoiseState();
+        console.log('>> [VoIP Helper] RNNoise carregado com sucesso.');
+    } catch (e) {
+        console.error('>> [VoIP Helper] Erro ao carregar RNNoise:', e);
+    }
+}
+
+/**
+ * Processa um chunk de áudio através do supressor de ruído RNNoise.
+ * Requer frames de exatamente 480 samples (@48kHz).
+ */
+function processDenoise(inputBuffer) {
+    if (!_state.denoiseEnabled || !_state.denoiseState) return inputBuffer;
+
+    // Acumula no buffer de denoise
+    _state.denoiseBuffer = Buffer.concat([_state.denoiseBuffer, inputBuffer]);
+
+    const SAMPLE_COUNT = 480;
+    const BYTE_COUNT = SAMPLE_COUNT * 2; // Int16
+    const processedFrames = [];
+
+    while (_state.denoiseBuffer.length >= BYTE_COUNT) {
+        const rawFrame = _state.denoiseBuffer.slice(0, BYTE_COUNT);
+        _state.denoiseBuffer = _state.denoiseBuffer.slice(BYTE_COUNT);
+
+        const floatFrame = new Float32Array(SAMPLE_COUNT);
+        for (let i = 0; i < SAMPLE_COUNT; i++) {
+            floatFrame[i] = rawFrame.readInt16LE(i * 2) / 32768.0;
+        }
+
+        // RNNoise processa o Float32Array in-place
+        _state.denoiseState.processFrame(floatFrame);
+
+        const outFrame = Buffer.allocUnsafe(BYTE_COUNT);
+        for (let i = 0; i < SAMPLE_COUNT; i++) {
+            let s = Math.round(floatFrame[i] * 32768.0);
+            if (s > 32767) s = 32767;
+            if (s < -32768) s = -32768;
+            outFrame.writeInt16LE(s, i * 2);
+        }
+        processedFrames.push(outFrame);
+    }
+
+    return processedFrames.length > 0 ? Buffer.concat(processedFrames) : Buffer.alloc(0);
+}
+
 // ────────────────────────────────────────
 // startMicAudio
 // ────────────────────────────────────────
 /**
  * Inicia captura de microfone via script PowerShell.
  */
-function startMicAudio(onChunk, onError, bypassGate = false) {
+async function startMicAudio(onChunk, onError, bypassGate = false) {
+    if (_state.denoiseEnabled) {
+        await initDenoise();
+    }
+
     const scriptPath = path.join(__dirname, '..', 'capture_audio.ps1');
     const deviceId = _state.preferredDeviceId !== null ? _state.preferredDeviceId : -1;
-    
+
     // Create a wrapper object that looks like an EventEmitter
     const audioInput = {
         process: null,
-        on: function(event, callback) {
+        on: function (event, callback) {
             if (event === 'data') this.onData = callback;
             if (event === 'error') this.onError = callback;
         },
-        start: function() {
+        start: function () {
             // Wait for compilation (Add-Type) warning
             console.log(`>> [VoIP Helper] Iniciando captura de áudio (Pode levar alguns segundos para compilar o script PS)...`);
-            
+
             console.log(`>> [VoIP Helper] Spawning PowerShell for deviceId: ${deviceId} using ${scriptPath}`);
             this.process = spawn('powershell', [
                 '-NoProfile',
                 '-NonInteractive',
                 '-ExecutionPolicy', 'Bypass',
-                '-File', scriptPath, 
+                '-File', scriptPath,
                 deviceId.toString()
             ], {
                 stdio: ['ignore', 'pipe', 'pipe']
             });
-            
+
             let firstData = true;
-            this.process.stdout.on('data', (data) => {
+            this.process.stdout.on('data', (rawChunk) => {
+                // Se o denoise estiver ativo, processamos o chunk antes de calcular o volume e enviar
+                const data = processDenoise(rawChunk);
+
+                // Se o buffer do denoise ainda não encheu um frame de 480 samples, data será vazio
+                if (data.length === 0) return;
+
                 if (firstData) {
                     console.log(`>> [VoIP Helper] Recebendo frames de áudio do microfone com sucesso.`);
                     firstData = false;
@@ -196,25 +263,30 @@ function startMicAudio(onChunk, onError, bypassGate = false) {
                 applyGain(data, _state.micGain);
 
                 _state.voiceLevel = calculateVolume(data);
-                
-                // Debug log fundamental para rastreio
-                if (Date.now() % 500 < 50) { // Log a cada ~500ms
-                    console.log(`>> [VoIP Debug] Vol: ${_state.voiceLevel}% | Gate: ${_state.sensitivity}%`);
-                }
 
-                // 2. Lógica de Perfil (Isolamento vs Estúdio)
-                let currentSensitivity = _state.sensitivity;
-                if (_state.inputProfile === 'isolation') {
-                   // Perfil de isolamento torna o noise gate mais "técnico" / agressivo
-                   currentSensitivity = Math.max(currentSensitivity, 15);
-                }
+                // Debug log to confirm data is coming in (max once per second to avoid spam)
+                if (!_state.lastLogTime || Date.now() - _state.lastLogTime > 1000) {
+                    const status = _state.denoiseEnabled ? 'AI Denoise ON' : 'Denoise OFF';
+                    console.log(`>> [VoIP Helper] Audio chunk processed [${status}]: ${data.length} bytes (Level: ${_state.voiceLevel}, Gate: ${_state.sensitivity})`);
+                    _state.lastLogTime = Date.now();
+                    // Debug log fundamental para rastreio
+                    if (Date.now() % 500 < 50) { // Log a cada ~500ms
+                        console.log(`>> [VoIP Debug] Vol: ${_state.voiceLevel}% | Gate: ${_state.sensitivity}%`);
+                    }
 
-                // Noise Gate: only pass data if it's above sensitivity (or bypass requested)
-                if (bypassGate || _state.voiceLevel >= currentSensitivity) {
-                    if (this.onData) this.onData(data);
-                }
-            });
-            
+                    // 2. Lógica de Perfil (Isolamento vs Estúdio)
+                    let currentSensitivity = _state.sensitivity;
+                    if (_state.inputProfile === 'isolation') {
+                        // Perfil de isolamento torna o noise gate mais "técnico" / agressivo
+                        currentSensitivity = Math.max(currentSensitivity, 15);
+                    }
+
+                    // Noise Gate: only pass data if it's above sensitivity (or bypass requested)
+                    if (bypassGate || _state.voiceLevel >= currentSensitivity) {
+                        if (this.onData) this.onData(data);
+                    }
+                });
+
             this.process.stderr.on('data', (data) => {
                 const msg = data.toString();
                 console.error(`>> [VoIP Helper] Mic PS Stderr: ${msg}`);
@@ -234,14 +306,14 @@ function startMicAudio(onChunk, onError, bypassGate = false) {
                 if (this.onError) this.onError(err);
             });
         },
-        quit: function() {
+        quit: function () {
             if (this.process) {
                 const pid = this.process.pid;
                 this.onData = null; // Trava lógica imediata
                 _state.voiceLevel = 0;
-                
+
                 console.log(`>> [VoIP Helper] DETONADOR: Encerrando grupo de processos (PID: ${pid})...`);
-                
+
                 try {
                     // Remover listeners e DESTRUIR os pipes para garantir silêncio absoluto
                     // Esse destroy() causa 'Broken pipe' no PowerShell, forçando-o a morrer graciosamente!
@@ -259,7 +331,7 @@ function startMicAudio(onChunk, onError, bypassGate = false) {
 
                     if (process.platform === 'win32') {
                         // FORÇA BRUTA: Tentar kill direto e via taskkill
-                        try { process.kill(pid, 'SIGKILL'); } catch(e) {}
+                        try { process.kill(pid, 'SIGKILL'); } catch (e) { }
                         exec(`taskkill /F /T /PID ${pid}`, (err) => {
                             if (err) console.error(`>> [VoIP Helper] Erro taskkill ${pid}:`, err.message);
                             else console.log(`>> [VoIP Helper] Processo ${pid} (PowerShell) finalizado.`);
@@ -269,7 +341,7 @@ function startMicAudio(onChunk, onError, bypassGate = false) {
                     }
                 } catch (e) {
                     console.error(`>> [VoIP Helper] Aviso ao encerrar grupo ${pid}: ${e.message}`);
-                    try { process.kill(pid, 'SIGKILL'); } catch (_) {}
+                    try { process.kill(pid, 'SIGKILL'); } catch (_) { }
                 }
                 this.process = null;
             }
@@ -278,7 +350,7 @@ function startMicAudio(onChunk, onError, bypassGate = false) {
 
     audioInput.on('data', onChunk);
     if (onError) audioInput.on('error', onError);
-    
+
     audioInput.start();
 
     _state.isTalking = true;
@@ -309,10 +381,10 @@ function listAudioOutputDevices() {
                 if (stderr) console.error(`>> [VoIP Helper] PowerShell stderr: ${stderr}`);
                 return resolve([]); // Resolve with empty array on error
             }
-            
+
             const devices = [];
             const lines = stdout.split('\n');
-            
+
             for (const line of lines) {
                 const match = line.match(/Device (\d+): (.+)/);
                 if (match) {
@@ -336,13 +408,13 @@ function listAudioOutputDevices() {
 function startPlayback() {
     const scriptPath = path.join(__dirname, '..', 'play_audio.ps1');
     const deviceId = _state.preferredSpeakerId !== null ? _state.preferredSpeakerId : -1;
-    
+
     console.log(`>> [VoIP Helper] Spawning Playback PS for deviceId: ${deviceId} using ${scriptPath}`);
     const playbackProcess = spawn('powershell', [
         '-NoProfile',
         '-NonInteractive',
         '-ExecutionPolicy', 'Bypass',
-        '-File', scriptPath, 
+        '-File', scriptPath,
         deviceId.toString()
     ]);
 
@@ -361,7 +433,7 @@ function startPlayback() {
 
     let audioOutput = {
         process: playbackProcess,
-        write: function(data) {
+        write: function (data) {
             if (this.process && this.process.stdin.writable) {
                 try {
                     // Aplicar Volume Master de Saída (Speaker Volume)
@@ -372,9 +444,9 @@ function startPlayback() {
                 }
             }
         },
-        end: function() {
+        end: function () {
             if (this.process) {
-                try { this.process.kill(); } catch (e) {}
+                try { this.process.kill(); } catch (e) { }
             }
         }
     };
@@ -430,6 +502,14 @@ function handleClientCommand(data, handlers) {
             console.log(`>> [VoIP Helper] SET_SENSITIVITY received: ${data.value}`);
             _state.sensitivity = parseInt(data.value) || 0;
             return 'SET_SENSITIVITY';
+        case 'SET_DENOISE':
+            console.log(`>> [VoIP Helper] SET_DENOISE received: ${data.value}`);
+            _state.denoiseEnabled = (data.value === true || data.value === 1 || data.value === 'true');
+            if (!_state.denoiseEnabled && _state.denoiseState) {
+                // Limpa o buffer se desligar para evitar resíduos de áudio
+                _state.denoiseBuffer = Buffer.alloc(0);
+            }
+            return 'SET_DENOISE';
         case 'REPORT':
             console.log(`>> [VoIP Helper] REPORT received for: ${data.targetName} (${data.targetId})`);
             return 'REPORT';

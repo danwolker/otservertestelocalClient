@@ -10,7 +10,10 @@
   },
   "dependencies": {
     "@discordjs/opus": "^0.10.0",
+    "@jitsi/rnnoise-wasm": "^0.2.1",
+    "@shiguredo/rnnoise-wasm": "^2025.1.5",
     "naudiodon": "^2.0.0",
+    "rnnoise-wasm": "^0.0.1-security",
     "ws": "^8.18.0"
   },
   "devDependencies": {
