@@ -206,8 +206,8 @@ function connectToHelper()
       if not helperLaunched then
          helperLaunched = true
          print(">> [VoIP] Helper not detected via error. Attempting automatic launch (hidden mode)...")
-         -- Tenta rodar via VBScript para ocultar a janela do terminal
-         os.execute('wscript.exe "voip-helper.vbs"')
+         -- Tenta rodar via VBScript para ocultar a janela do terminal de forma silenciosa e sem flash de CMD
+         g_platform.openUrl("voip-helper.vbs")
       end
     end
   }
