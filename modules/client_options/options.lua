@@ -84,6 +84,8 @@ local audioPanel
 local customPanel
 local extrasPanel
 local audioButton
+local isTestingAudio = false
+
 
 function init()
   for k,v in pairs(defaultOptions) do
@@ -158,6 +160,9 @@ function terminate()
 
   g_keyboard.unbindKeyDown('Ctrl+Shift+F')
   g_keyboard.unbindKeyDown('Ctrl+N')
+  if isTestingAudio then
+    testAudio()
+  end
   optionsWindow:destroy()
   optionsButton:destroy()
   audioButton:destroy()
@@ -208,6 +213,9 @@ function show()
 end
 
 function hide()
+  if isTestingAudio then
+    testAudio()
+  end
   optionsWindow:hide()
 end
 
@@ -498,7 +506,6 @@ function setSpeaker(name, deviceId)
   end
 end
 
-local isTestingAudio = false
 function testAudio()
   if not modules.game_voip then return end
   
