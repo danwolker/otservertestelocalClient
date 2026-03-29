@@ -172,6 +172,7 @@ function connectToHelper()
       elseif data.type == 'report_response' then
         if data.success then
           displayInfoBox(tr('Report Protocol'), tr('Sua denúncia foi registrada com sucesso sob o Protocolo: #') .. tostring(data.protocol) .. tr('\n\nUse este número ao abrir um ticket no website do jogo.'))
+          modules.game_textmessage.displayStatusMessage(tr('Denuncia criada com sucesso! Numero do Protocolo: #') .. tostring(data.protocol))
         else
           modules.game_textmessage.displayFailureMessage(tr('Erro no Report: ') .. tostring(data.error))
         end
@@ -299,7 +300,7 @@ function sendReport()
         g_game.getProtocolGame():sendExtendedOpcode(OPCODE_SPEAKING, "REPORT")
         
         lastReportTime = os.time()
-        modules.game_textmessage.displayStatusMessage(tr('Denuncia enviada com sucesso. O replay da party sera analisado.'))
+        modules.game_textmessage.displayStatusMessage(tr('Gerando protocolo de denuncia. Aguarde...'))
         
         if confirmBox then
           confirmBox:destroy()
