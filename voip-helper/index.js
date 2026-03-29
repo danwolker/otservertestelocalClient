@@ -2,6 +2,7 @@
 
 const WebSocket = require('ws');
 const { OpusEncoder } = require('@discordjs/opus');
+const AudioMixer = require('./src/audioMixer');
 
 const {
     setCaptureMode,
@@ -44,8 +45,20 @@ wss.on('connection', (ws) => {
         lastPingTime: 0,
         statusInterval: null,
         captureEncoder: new OpusEncoder(SAMPLE_RATE, CHANNELS),
-        decoders: new Map() // playerId -> OpusEncoder
+        decoders: new Map(), // playerId -> OpusEncoder
+        mixer: null
     };
+
+    // Inicializar o Mixer
+    clientCtx.mixer = new AudioMixer((mixedFrame) => {
+        if (clientCtx.speaker) {
+            clientCtx.speaker.write(mixedFrame);
+        }
+    }, {
+        sampleRate: SAMPLE_RATE,
+        channels: CHANNELS,
+        frameSize: FRAME_SIZE
+    });
 
     ws.on('message', (message) => {
         try {
@@ -68,16 +81,12 @@ wss.on('connection', (ws) => {
                 return;
             }
 
-            if (data.type === 'GLOBAL_MUTE') {
-                // Mute global: somente o líder pode ativar, servidor valida
+            if (data.type === 'GLOBAL_MUTE' || data.type === 'REPORT' || data.type === 'REPORT_GENERAL') {
                 if (clientCtx.mainVoipWs && clientCtx.mainVoipWs.readyState === WebSocket.OPEN) {
-                    clientCtx.mainVoipWs.send(JSON.stringify({
-                        type: 'mute_global',
-                        muted: data.muted
-                    }));
-                    console.log(`>> [VoIP Helper] Mute global enviado ao servidor: ${data.muted}`);
+                    clientCtx.mainVoipWs.send(JSON.stringify(data));
+                    console.log(`>> [VoIP Helper] Comando ${data.type} repassado ao servidor.`);
                 } else {
-                    console.warn('>> [VoIP Helper] GLOBAL_MUTE ignorado: sem conexão com servidor principal');
+                    console.warn(`>> [VoIP Helper] ${data.type} ignorado: sem conexão com servidor principal`);
                 }
                 return;
             }
@@ -137,6 +146,9 @@ wss.on('connection', (ws) => {
         if (clientCtx.speaker) {
             clientCtx.speaker.end();
             clientCtx.speaker = null;
+        }
+        if (clientCtx.mixer) {
+            clientCtx.mixer.stop();
         }
     });
 
@@ -365,7 +377,9 @@ function handleIncomingAudio(ctx, rawData) {
         }
 
         const decoded = decoder.decode(encodedBuffer);
-        ctx.speaker.write(decoded);
+        
+        // Em vez de escrever direto, enviamos para o Mixer
+        ctx.mixer.addAudio(playerId, decoded);
     } catch (e) {
         console.error('>> [VoIP Helper] Erro ao decodificar áudio:', e);
     }

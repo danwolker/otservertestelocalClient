@@ -1,6 +1,7 @@
 -- private variables
 local background
 local clientVersionLabel
+local voipConnected = false
 
 -- public functions
 function init()
@@ -8,7 +9,7 @@ function init()
   background:lower()
 
   clientVersionLabel = background:getChildById('clientVersionLabel')
-  clientVersionLabel:setText('OTClientV8 ' .. g_app.getVersion() .. '\nrev ' .. g_app.getBuildRevision() .. '\nMade by:\n' .. g_app.getAuthor() .. "")
+  refreshVersionLabel()
   
   if not g_game.isOnline() then
     addEvent(function() g_effects.fadeIn(clientVersionLabel, 1500) end)
@@ -24,8 +25,6 @@ function terminate()
 
   g_effects.cancelFade(background:getChildById('clientVersionLabel'))
   background:destroy()
-
-  Background = nil
 end
 
 function hide()
@@ -40,8 +39,15 @@ function hideVersionLabel()
   background:getChildById('clientVersionLabel'):hide()
 end
 
-function setVersionText(text)
-  clientVersionLabel:setText(text)
+function refreshVersionLabel()
+  if not clientVersionLabel then return end
+  local status = voipConnected and "Conectado" or "Desconectado"
+  clientVersionLabel:setText('OTClientV8 ' .. g_app.getVersion() .. '\nrev ' .. g_app.getBuildRevision() .. '\nMade by:\n' .. g_app.getAuthor() .. '\nVoIP: ' .. status)
+end
+
+function updateVoipStatus(connected)
+  voipConnected = connected
+  refreshVersionLabel()
 end
 
 function getBackground()

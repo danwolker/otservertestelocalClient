@@ -65,7 +65,7 @@ public class AudioCapture {
     private static bool isRecording = false;
 
     // Buffers setup
-    private const int BUFFER_COUNT = 3;
+    private const int BUFFER_COUNT = 10;
     private const int BUFFER_SIZE = 1920; // 20ms of 48kHz 16-bit mono
     private static IntPtr[] buffers = new IntPtr[BUFFER_COUNT];
     private static WAVEHDR[] headers = new WAVEHDR[BUFFER_COUNT];

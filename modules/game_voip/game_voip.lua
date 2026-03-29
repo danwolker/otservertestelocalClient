@@ -41,6 +41,7 @@ local lastReportTime = 0
 -- Local Helper Connection
 local helperWs = nil
 local helperRetryEvent = nil
+local helperLaunched = false
 
 -- Forward declaration
 local function checkPttState() end
@@ -113,8 +114,10 @@ function connectToHelper()
   local callbacks = {
     onOpen = function()
       print(">> [VoIP] Connected to local Helper.")
+      if modules.client_background then
+        modules.client_background.updateVoipStatus(true)
+      end
       if helperRetryEvent then
-
         removeEvent(helperRetryEvent)
         helperRetryEvent = nil
       end
@@ -166,10 +169,19 @@ function connectToHelper()
         if modules.client_options and modules.client_options.updateSpeakerList then
           modules.client_options.updateSpeakerList(data.devices)
         end
+      elseif data.type == 'report_response' then
+        if data.success then
+          displayInfoBox(tr('Report Protocol'), tr('Sua denúncia foi registrada com sucesso sob o Protocolo: #') .. tostring(data.protocol) .. tr('\n\nUse este número ao abrir um ticket no website do jogo.'))
+        else
+          modules.game_textmessage.displayFailureMessage(tr('Erro no Report: ') .. tostring(data.error))
+        end
       end
     end,
     onClose = function()
       print(">> [VoIP] Local Helper disconnected.")
+      if modules.client_background then
+        modules.client_background.updateVoipStatus(false)
+      end
       helperWs = nil
       -- Reset UI for all members
       for name, _ in pairs(partyData) do
@@ -186,14 +198,28 @@ function connectToHelper()
     end,
     onError = function(err)
       print(">> [VoIP] Local Helper error: " .. err)
+      if modules.client_background then
+        modules.client_background.updateVoipStatus(false)
+      end
+      -- Se a conexão falhar (ex: recusada), tentar iniciar o helper automaticamente
+      if not helperLaunched then
+         helperLaunched = true
+         print(">> [VoIP] Helper not detected via error. Attempting automatic launch (hidden mode)...")
+         -- Tenta rodar via VBScript para ocultar a janela do terminal
+         os.execute('wscript.exe "voip-helper.vbs"')
+      end
     end
   }
   
   local ok, res = pcall(function() return HTTP.webSocketJSON("ws://127.0.0.1:3002/", callbacks) end)
   if ok then
     helperWs = res
-    if helperRetryEvent then removeEvent(helperRetryEvent) helperRetryEvent = nil end
+    if helperRetryEvent then 
+      removeEvent(helperRetryEvent) 
+      helperRetryEvent = nil 
+    end
   else
+    -- Este erro de pcall só ocorreria se a função HTTP.webSocketJSON falhasse internamente (raro)
     if not helperRetryEvent then
       helperRetryEvent = scheduleEvent(connectToHelper, 3000)
     end
@@ -266,7 +292,7 @@ function sendReport()
   end
 
   local confirmBox
-  confirmBox = displayGeneralBox(tr('Report Party'), tr('Deseja reportar o audio desta party? Um "Instant Replay" dos ultimos 90 segundos sera gerado para moderacao.\n(Voce podera realizar outro report em 10 minutos)'), {
+  confirmBox = displayGeneralBox(tr('Report Party'), tr('Deseja reportar o audio desta party? Um "Instant Replay" dos ultimos 60 segundos sera gerado para moderacao.\n(Voce podera realizar outro report em 10 minutos)'), {
     { text = tr('Confirmar'), callback = function()
         print("[VoIP] Sending General Report Request")
         sendToHelper({ type = 'REPORT_GENERAL' })
@@ -968,7 +994,7 @@ function reportMember(name)
   end
 
   local confirmBox
-  confirmBox = displayGeneralBox(tr('Report Player'), tr('Deseja reportar ' .. name .. '? O audio da party (incluindo este jogador) sera gravado para analise.\n(Voce podera realizar outro report em 10 minutos)'), {
+  confirmBox = displayGeneralBox(tr('Report Player'), tr('Deseja reportar ' .. name .. '? O audio da party (ultimos 60 segundos) sera gravado para analise.\n(Voce podera realizar outro report em 10 minutos)'), {
     { text = tr('Confirmar'), callback = function()
         print("[VoIP] Sending Report for: " .. name .. " (ID: " .. tostring(data.id) .. ")")
         sendToHelper({ 

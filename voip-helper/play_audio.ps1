@@ -84,7 +84,7 @@ public class AudioPlay {
             return;
         }
 
-        int BUFFER_COUNT = 3;
+        int BUFFER_COUNT = 12;
         IntPtr[] buffers = new IntPtr[BUFFER_COUNT];
         IntPtr[] headerPtrs = new IntPtr[BUFFER_COUNT];
 

@@ -15,7 +15,7 @@ UIWidget
     text-align: center
     text-auto-resize: false
     width: 220
-    height: 90
+    height: 110
     padding: 2
     color: #ffffff
     font: terminus-14px-bold
