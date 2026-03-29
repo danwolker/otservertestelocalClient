@@ -84,9 +84,9 @@ wss.on('connection', (ws) => {
             if (data.type === 'GLOBAL_MUTE' || data.type === 'REPORT' || data.type === 'REPORT_GENERAL') {
                 if (clientCtx.mainVoipWs && clientCtx.mainVoipWs.readyState === WebSocket.OPEN) {
                     clientCtx.mainVoipWs.send(JSON.stringify(data));
-                    console.log(`>> [VoIP Helper] Comando ${data.type} repassado ao servidor.`);
+                    console.log(`>> [VoIP Helper] RELAY: Command ${data.type} sent to main server.`);
                 } else {
-                    console.warn(`>> [VoIP Helper] ${data.type} ignorado: sem conexão com servidor principal`);
+                    console.warn(`>> [VoIP Helper] RELAY ERROR: ${data.type} ignored: main server not connected (state: ${clientCtx.mainVoipWs?.readyState})`);
                 }
                 return;
             }
@@ -150,6 +150,19 @@ wss.on('connection', (ws) => {
         if (clientCtx.mixer) {
             clientCtx.mixer.stop();
         }
+
+        setTimeout(() => {
+            let activeClients = 0;
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    activeClients++;
+                }
+            });
+            if (activeClients === 0) {
+                console.log('>> [VoIP Helper] Nenhum cliente conectado. Encerrando o Helper.');
+                process.exit(0);
+            }
+        }, 5000);
     });
 
     startStatusHeartbeat(clientCtx);
