@@ -197,9 +197,9 @@ class AudioMixer {
             this.outputBuffer.writeInt16LE(sample, i * 2);
         }
 
-        // 4. Output
+        // 4. Output (Usa Buffer.from para criar cópia por valor, evitando duplicação em loops)
         if (this.onFrameMixed) {
-            this.onFrameMixed(this.outputBuffer);
+            this.onFrameMixed(Buffer.from(this.outputBuffer));
         }
     }
 }
