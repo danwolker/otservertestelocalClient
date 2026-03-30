@@ -67,21 +67,22 @@ wss.on('connection', (ws) => {
 
             // ─── Comandos de controle de sala: repassar direto ao VoIP server ───
             if (data.type === 'MUTE_MEMBER') {
-                // Mute local: instruir o servidor a não repassar áudio de targetId para este cliente
+                // Mute local ou global: repassar instrução ao servidor VoIP
                 if (clientCtx.mainVoipWs && clientCtx.mainVoipWs.readyState === WebSocket.OPEN) {
                     clientCtx.mainVoipWs.send(JSON.stringify({
                         type: 'mute_member',
                         targetPlayerId: data.targetId,
-                        muted: data.muted
+                        muted: data.muted,
+                        isGlobal: data.isGlobal
                     }));
-                    console.log(`>> [VoIP Helper] Mute local enviado ao servidor: ID ${data.targetId} -> ${data.muted}`);
+                    console.log(`>> [VoIP Helper] MUTE_MEMBER enviado ao servidor: ID ${data.targetId} -> Mutado: ${data.muted} (Global: ${data.isGlobal})`);
                 } else {
                     console.warn('>> [VoIP Helper] MUTE_MEMBER ignorado: sem conexão com servidor principal');
                 }
                 return;
             }
 
-            if (data.type === 'GLOBAL_MUTE' || data.type === 'REPORT' || data.type === 'REPORT_GENERAL') {
+            if (data.type === 'GLOBAL_MUTE' || data.type === 'MUTE_VOCATION' || data.type === 'REPORT' || data.type === 'REPORT_GENERAL') {
                 if (clientCtx.mainVoipWs && clientCtx.mainVoipWs.readyState === WebSocket.OPEN) {
                     clientCtx.mainVoipWs.send(JSON.stringify(data));
                     console.log(`>> [VoIP Helper] RELAY: Command ${data.type} sent to main server.`);
