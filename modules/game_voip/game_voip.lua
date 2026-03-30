@@ -533,10 +533,22 @@ function onMuteClick(widget)
   widget:setChecked(checked)
   local vocationPanel = voipWindow:recursiveGetChildById('vocationPanel')
   if id == "All" then
-    if vocationPanel then for _, child in ipairs(vocationPanel:getChildren()) do child:setChecked(checked) mutedVocations[child:getId()] = checked end end
+    if vocationPanel then 
+      for _, child in ipairs(vocationPanel:getChildren()) do 
+        child:setChecked(checked) 
+        mutedVocations[child:getId()] = checked 
+        local vocId = -1
+        for k, v in pairs(VOCATION_MUTE_ID) do if v == child:getId() then vocId = k break end end
+        if vocId ~= -1 then sendToHelper({ type = 'MUTE_VOCATION', vocId = vocId, muted = checked, isGlobal = false }) end
+      end 
+    end
     mutedVocations["All"] = checked
   else
     mutedVocations[id] = checked
+    local vocId = -1
+    for k, v in pairs(VOCATION_MUTE_ID) do if v == id then vocId = k break end end
+    if vocId ~= -1 then sendToHelper({ type = 'MUTE_VOCATION', vocId = vocId, muted = checked, isGlobal = false }) end
+    
     local allChecked = true
     if vocationPanel then for _, child in ipairs(vocationPanel:getChildren()) do if not child:isChecked() then allChecked = false break end end end
     local allBtn = voipWindow:recursiveGetChildById('All')

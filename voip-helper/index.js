@@ -66,27 +66,19 @@ wss.on('connection', (ws) => {
             console.log(`>> [VoIP Helper] Comando recebido: ${data.type}`);
 
             // ─── Comandos de controle de sala: repassar direto ao VoIP server ───
-            if (data.type === 'MUTE_MEMBER') {
-                // Mute local: instruir o servidor a não repassar áudio de targetId para este cliente
+            const relayCommands = ['MUTE_MEMBER', 'MUTE_VOCATION', 'GLOBAL_MUTE', 'REPORT', 'REPORT_GENERAL'];
+            if (relayCommands.includes(data.type)) {
                 if (clientCtx.mainVoipWs && clientCtx.mainVoipWs.readyState === WebSocket.OPEN) {
-                    clientCtx.mainVoipWs.send(JSON.stringify({
-                        type: 'mute_member',
-                        targetPlayerId: data.targetId,
-                        muted: data.muted
-                    }));
-                    console.log(`>> [VoIP Helper] Mute local enviado ao servidor: ID ${data.targetId} -> ${data.muted}`);
-                } else {
-                    console.warn('>> [VoIP Helper] MUTE_MEMBER ignorado: sem conexão com servidor principal');
-                }
-                return;
-            }
+                    // Mapear nomes de comandos se necessário (o server agora aceita ambos, mas vamos mandar o esperado)
+                    let serverMsg = { ...data };
+                    if (data.type === 'GLOBAL_MUTE') serverMsg.type = 'mute_global';
+                    if (data.type === 'MUTE_MEMBER') serverMsg.type = 'mute_member';
+                    if (data.type === 'MUTE_VOCATION') serverMsg.type = 'mute_vocation';
 
-            if (data.type === 'GLOBAL_MUTE' || data.type === 'REPORT' || data.type === 'REPORT_GENERAL') {
-                if (clientCtx.mainVoipWs && clientCtx.mainVoipWs.readyState === WebSocket.OPEN) {
-                    clientCtx.mainVoipWs.send(JSON.stringify(data));
+                    clientCtx.mainVoipWs.send(JSON.stringify(serverMsg));
                     console.log(`>> [VoIP Helper] RELAY: Command ${data.type} sent to main server.`);
                 } else {
-                    console.warn(`>> [VoIP Helper] RELAY ERROR: ${data.type} ignored: main server not connected (state: ${clientCtx.mainVoipWs?.readyState})`);
+                    console.warn(`>> [VoIP Helper] RELAY ERROR: ${data.type} ignored: main server not connected`);
                 }
                 return;
             }
