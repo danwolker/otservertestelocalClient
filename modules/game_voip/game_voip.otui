@@ -27,9 +27,9 @@ VoipMember < Panel
     id: creature
     anchors.left: parent.left
     anchors.top: parent.top
-    size: 24 24
-    margin-left: 2
-    margin-top: 4
+    size: 32 32
+    margin-left: 1
+    margin-top: 0
     old-scaling: true
     phantom: true
 

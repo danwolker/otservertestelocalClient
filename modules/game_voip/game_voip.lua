@@ -404,8 +404,9 @@ function onExtendedVoipSession(protocol, opcode, buffer)
 
   local currentMembers = {}
   for _, member in ipairs(session.members) do
-    partyData[member.name] = { id = member.playerId, vocID = member.vocation, isLeader = member.isLeader }
-    addMember(member.name, VOCATION_INFO[member.vocation] and VOCATION_INFO[member.vocation].name or "None", member.isLeader, nil, 100, 100)
+    local outfit = (partyData[member.name] and partyData[member.name].outfit) or nil
+    partyData[member.name] = { id = member.playerId, vocID = member.vocation, isLeader = member.isLeader, outfit = outfit }
+    addMember(member.name, VOCATION_INFO[member.vocation] and VOCATION_INFO[member.vocation].name or "None", member.isLeader, outfit, 100, 100)
     currentMembers[member.name] = true
   end
 
@@ -430,9 +431,10 @@ function onVoipSession(protocol, msg)
   for i = 1, memberCount do
     local name = msg:getString()
     local member = { playerId = msg:getU32(), name = name, vocation = msg:getU8(), isLeader = msg:getU8() == 1, mutedGlobal = msg:getU8() == 1 }
-    partyData[name] = { id = member.playerId, vocID = member.vocation, isLeader = member.isLeader }
+    local outfit = (partyData[name] and partyData[name].outfit) or nil
+    partyData[name] = { id = member.playerId, vocID = member.vocation, isLeader = member.isLeader, outfit = outfit }
     if member.mutedGlobal then mutedGlobals[member.playerId] = true end
-    addMember(name, VOCATION_INFO[member.vocation] and VOCATION_INFO[member.vocation].name or "None", member.isLeader, nil, 100, 100)
+    addMember(name, VOCATION_INFO[member.vocation] and VOCATION_INFO[member.vocation].name or "None", member.isLeader, outfit, 100, 100)
     currentMembers[name] = true
   end
 
@@ -615,9 +617,15 @@ function onMemberClick(widget, mousePos, mouseButton)
     menu:setGameMenu(true)
     menu:addOption('Seguir', function() local c = getCreatureByName(name) if c then g_game.follow(c) end end)
     menu:addOption('Mandar mensagem', function() g_game.openPrivateChannel(name) end)
+    
+    -- Opções Nativas (Texto)
+    local isIgnored = g_game.isIgnored(name)
+    menu:addOption(isIgnored and 'Parar de ignorar' or 'Ignorar jogador', function() if isIgnored then g_game.removeIgnore(name) else g_game.addIgnore(name) end end)
+
+    -- Opções VoIP (Áudio)
     if not data.isLeader then
       local isLocallyMuted = (mutedPlayers[name] == true)
-      menu:addOption(isLocallyMuted and 'Parar de ignorar' or 'Ignorar jogador', function() togglePlayerMute(name, false) end)
+      menu:addOption(isLocallyMuted and 'Desmutar para mim' or 'Mutar para mim', function() togglePlayerMute(name, false) end)
     end
     if isLocalLeader() and not data.isLeader then
       local isGloballyMuted = (mutedGlobals[data.id] == true)
