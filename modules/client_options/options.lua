@@ -69,7 +69,6 @@ local defaultOptions = {
   antialiasing = true,
   autoExit = false,
   micSensitivity = 10,
-  micGain = 100,
   speakerVolume = 100,
   inputProfile = 'studio'
 }
@@ -394,9 +393,6 @@ function setOption(key, value, force)
     if modules.game_voip then
       modules.game_voip.setSensitivity(value)
     end
-  elseif key == 'micGain' then
-    audioPanel:getChildById('micVolumeLabel'):setText(tr('Mic Volume: %d%%', value))
-    if modules.game_voip then modules.game_voip.setMicGain(value) end
   elseif key == 'speakerVolume' then
     audioPanel:getChildById('speakerVolumeLabel'):setText(tr('Speaker Volume: %d%%', value))
     if modules.game_voip then modules.game_voip.setSpeakerVolume(value) end

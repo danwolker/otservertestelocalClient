@@ -274,7 +274,7 @@ function startAudioTest(ctx) {
             }
         },
         (e) => console.error('>> [VoIP Helper] Erro no teste de áudio:', e),
-        true // Bypass Noise Gate durante o teste (Permite ouvir qualidade real e ruídos de fundo)
+        false // Foi alterado para FALSE: agora o teste reflete fielmente o que a sala vai ouvir (respeita o Gate de Isolamento)
     );
 }
 // Nota: O teste agora usa o Mixer para garantir sincronia e remover stuttering (anti-jitter).

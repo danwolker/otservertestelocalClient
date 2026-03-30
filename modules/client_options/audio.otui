@@ -76,20 +76,6 @@ OptionPanel
     maximum: 100
     @onValueChange: modules.client_options.setOption('micSensitivity', self:getValue())
 
-  Label
-    id: micVolumeLabel
-    !text: tr('Mic Volume: %d%%', 100)
-    margin-top: 10
-    @onSetup: |
-      local value = modules.client_options.getOption('micGain')
-      self:setText(tr('Mic Volume: %d%%', value))
-
-  OptionScrollbar
-    id: micGain
-    margin-top: 3
-    minimum: 0
-    maximum: 200
-    @onValueChange: modules.client_options.setOption('micGain', self:getValue())
 
   Label
     id: speakerVolumeLabel
