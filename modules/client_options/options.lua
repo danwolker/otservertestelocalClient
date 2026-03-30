@@ -69,8 +69,7 @@ local defaultOptions = {
   antialiasing = true,
   autoExit = false,
   micSensitivity = 10,
-  speakerVolume = 100,
-  inputProfile = 'studio'
+  speakerVolume = 100
 }
 
 local optionsWindow
@@ -123,12 +122,6 @@ function init()
   audioPanel = g_ui.loadUI('audio')
   optionsTabBar:addTab(tr('Audio'), audioPanel, '/images/optionstab/audio')
   
-  local profileCombo = audioPanel:getChildById('inputProfile')
-  if profileCombo then
-    profileCombo:addOption(tr('Estudio (Audio Puro)'), 'studio')
-    profileCombo:addOption(tr('Isolamento de Voz'), 'isolation')
-  end
-
 
   extrasPanel = g_ui.createWidget('OptionPanel')
   for _, v in ipairs(g_extras.getAll()) do
@@ -396,8 +389,6 @@ function setOption(key, value, force)
   elseif key == 'speakerVolume' then
     audioPanel:getChildById('speakerVolumeLabel'):setText(tr('Speaker Volume: %d%%', value))
     if modules.game_voip then modules.game_voip.setSpeakerVolume(value) end
-  elseif key == 'inputProfile' then
-    if modules.game_voip then modules.game_voip.setInputProfile(value) end
   end
 
   -- change value for keybind updates

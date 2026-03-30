@@ -23,15 +23,9 @@ let _state = {
     pcmBuffer: Buffer.alloc(0),
     voiceLevel: 0,
     sensitivity: 10,
-    denoiseEnabled: true,       // Filtro Inteligente (RNNoise)
-    rnnoise: null,              // Módulo RNNoise carregado
-    denoiseState: null,         // Estado da RNN para o microfone
-    denoiseBuffer: Buffer.alloc(0), // Buffer para alinhar frames de 480 samples
-    vadLevel: 0,                // Probabilidade de voz (0 a 1)
     isGateOpen: false,          // Controle para logs
     micGain: 100,               // 100 = real (1.0x), 200 = 2.0x, etc.
     speakerVolume: 100,         // Master volume para o que ouvimos
-    inputProfile: 'studio',     // 'studio' | 'isolation'
 };
 
 /**
@@ -159,79 +153,9 @@ function sendPcmChunk(chunk, ws, opus, wsOpen) {
 }
 
 /**
- * Inicializa o módulo de supressão de ruído RNNoise.
- */
-async function initDenoise() {
-    if (_state.rnnoise) return;
-    try {
-        console.log('>> [VoIP Helper] Carregando módulo RNNoise (Machine Learning)...');
-        
-        // TRUQUE: O pacote @shiguredo/rnnoise-wasm foi compilado para o navegador.
-        // Ele crasha internamente se não encontrar o `window`. Vamos criar um shim global:
-        if (typeof global.window === 'undefined') {
-            global.window = global;
-            global.WorkerGlobalScope = global;
-        }
-
-        const { Rnnoise } = await import('@shiguredo/rnnoise-wasm');
-
-        _state.rnnoise = await Rnnoise.load();
-        _state.denoiseState = _state.rnnoise.createDenoiseState();
-        console.log('>> [VoIP Helper] RNNoise carregado com sucesso.');
-    } catch (e) {
-        console.error('>> [VoIP Helper] Erro crítico ao carregar filtro Inteligente RNNoise:', e);
-    }
-}
-
-/**
- * Processa um chunk de áudio através do supressor de ruído RNNoise apenas para calcular Voice Activity Detection (VAD).
- * Requer frames de exatamente 480 samples (@48kHz).
- */
-function updateVAD(inputBuffer) {
-    if (_state.inputProfile !== 'isolation' || !_state.denoiseEnabled || !_state.denoiseState) {
-        _state.vadLevel = 0;
-        return;
-    }
-
-    // Acumula no buffer de denoise para alinhar frames de 10ms (480 samples)
-    _state.denoiseBuffer = Buffer.concat([_state.denoiseBuffer, inputBuffer]);
-
-    const SAMPLE_COUNT = 480;
-    const BYTE_COUNT = SAMPLE_COUNT * 2; // Int16 PCM (2 bytes por sample)
-    let totalVad = 0;
-    let framesCount = 0;
-
-    while (_state.denoiseBuffer.length >= BYTE_COUNT) {
-        const rawFrame = _state.denoiseBuffer.slice(0, BYTE_COUNT);
-        _state.denoiseBuffer = _state.denoiseBuffer.slice(BYTE_COUNT);
-
-        const floatFrame = new Float32Array(SAMPLE_COUNT);
-        for (let i = 0; i < SAMPLE_COUNT; i++) {
-            // O modelo processa perfeitamente dados na escala [-32768, 32767] para classificar ruído vs voz
-            floatFrame[i] = rawFrame.readInt16LE(i * 2); 
-        }
-
-        // RNNoise retorna a probabilidade de VAD (0.0 a 1.0) baseada nos dados classificados
-        const vadProb = _state.denoiseState.processFrame(floatFrame);
-        totalVad += vadProb;
-        framesCount++;
-    }
-
-    if (framesCount > 0) {
-        _state.vadLevel = totalVad / framesCount;
-    }
-}
-
-// ────────────────────────────────────────
-// startMicAudio
-// ────────────────────────────────────────
-/**
  * Inicia captura de microfone via script PowerShell.
  */
 async function startMicAudio(onChunk, onError, bypassGate = false) {
-    if (_state.denoiseEnabled) {
-        await initDenoise();
-    }
 
     const scriptPath = path.join(__dirname, '..', 'capture_audio.ps1');
     const deviceId = _state.preferredDeviceId !== null ? _state.preferredDeviceId : -1;
@@ -263,10 +187,6 @@ async function startMicAudio(onChunk, onError, bypassGate = false) {
                 // 1. Aplicar Ganho do Microfone (Fixado em 100% no default, preservando áudio natural)
                 applyGain(rawChunk, _state.micGain);
 
-                // Executa a inferência de IA (RNNoise) apenas se Isolamento estiver ligado
-                // Isso atualiza a variável global _state.vadLevel e usa os dados matemáticos puros para precisão
-                updateVAD(rawChunk);
-
                 const data = rawChunk; // Usamos o áudio puro em vez do áudio bufferizado com noise-cancellation (para máxima qualidade e não corromper WebSockets)
 
                 if (firstData) {
@@ -278,45 +198,22 @@ async function startMicAudio(onChunk, onError, bypassGate = false) {
 
                 // Debug log fundamental para rastreio
                 if (!_state.lastLogTime || Date.now() - _state.lastLogTime > 1000) {
-                    const status = _state.inputProfile === 'isolation' && _state.denoiseEnabled ? 'AI Denoise ON' : 'Denoise OFF';
-                    const vadStr = _state.inputProfile === 'isolation' && _state.denoiseEnabled ? ` | VAD: ${Math.round(_state.vadLevel * 100)}%` : '';
-                    console.log(`>> [VoIP Helper] Audio processed [${status}]: ${data.length} bytes (Level: ${_state.voiceLevel}, Gate: ${_state.sensitivity}${vadStr})`);
+                    console.log(`>> [VoIP Helper] Audio processed: ${data.length} bytes (Level: ${_state.voiceLevel}, Gate: ${_state.sensitivity})`);
                     _state.lastLogTime = Date.now();
                 }
 
-                // 2. Lógica de Perfil (Isolamento vs Estúdio)
                 let passGate = false;
                 let currentSensitivity = _state.sensitivity;
 
-                // Failsafe: Se o denoise estiver desligado, o perfil isolation deve agir como o studio
-                // pois não temos dados de VAD confiáveis para isolar.
-                if (_state.inputProfile === 'isolation' && _state.denoiseEnabled) {
-                    // MODO ISOLAMENTO: Inteligente via VAD (IA)
-                    // IA CERTA (> 60%): Abre o microfone, mesmo se o volume for baixo (voz limpa).
-                    // IA NA DÚVIDA (> 30%): Precisa de um volume razoável (sensibilidade manual).
-                    // IA EM SILÊNCIO (< 30%): Precisa de um volume muito alto para ser um Failsafe (acima de 35% de volume real).
-                    
-                    const isVADCertain = _state.vadLevel > 0.60;
-                    const isProbableVoice = _state.vadLevel > 0.30;
-                    
-                    if (isVADCertain) {
-                        passGate = true;
-                    } else if (isProbableVoice && _state.voiceLevel >= currentSensitivity) {
-                        passGate = true;
-                    } else if (_state.voiceLevel >= Math.max(currentSensitivity, 35)) {
-                        passGate = true;
-                    }
-                } else {
-                    // MODO STUDIO ou ISOLATION SEM FILTRO: Sensibilidade manual padrão
-                    if (_state.voiceLevel >= currentSensitivity) {
-                        passGate = true;
-                    }
+                // MODO PADRÃO: Sensibilidade manual
+                if (_state.voiceLevel >= currentSensitivity) {
+                    passGate = true;
                 }
 
                 // Noise Gate final e LOG de abertura (apenas transição para evitar spam)
                 if (bypassGate || passGate) {
                     if (!_state.isGateOpen && !bypassGate) {
-                         console.log(`>> [VoIP Helper] GATE OPEN [Profile: ${_state.inputProfile}] [Vol: ${_state.voiceLevel}%] [VAD: ${Math.round(_state.vadLevel * 100)}%]`);
+                         console.log(`>> [VoIP Helper] GATE OPEN [Vol: ${_state.voiceLevel}%]`);
                     }
                     _state.isGateOpen = true;
                     if (this.onData) this.onData(data);
@@ -544,14 +441,7 @@ function handleClientCommand(data, handlers) {
             console.log(`>> [VoIP Helper] SET_SENSITIVITY received: ${data.value}`);
             _state.sensitivity = parseInt(data.value) || 0;
             return 'SET_SENSITIVITY';
-        case 'SET_DENOISE':
-            console.log(`>> [VoIP Helper] SET_DENOISE received: ${data.value}`);
-            _state.denoiseEnabled = (data.value === true || data.value === 1 || data.value === 'true');
-            if (!_state.denoiseEnabled && _state.denoiseState) {
-                // Limpa o buffer se desligar para evitar resíduos de áudio
-                _state.denoiseBuffer = Buffer.alloc(0);
-            }
-            return 'SET_DENOISE';
+
         case 'REPORT':
             console.log(`>> [VoIP Helper] REPORT received for: ${data.targetName} (${data.targetId})`);
             return 'REPORT';
@@ -566,10 +456,7 @@ function handleClientCommand(data, handlers) {
             console.log(`>> [VoIP Helper] SET_SPEAKER_VOLUME: ${data.value}%`);
             _state.speakerVolume = parseInt(data.value) || 100;
             return 'SET_SPEAKER_VOLUME';
-        case 'SET_INPUT_PROFILE':
-            console.log(`>> [VoIP Helper] SET_INPUT_PROFILE: ${data.value}`);
-            _state.inputProfile = data.value || 'studio';
-            return 'SET_INPUT_PROFILE';
+
         default:
             return null;
     }

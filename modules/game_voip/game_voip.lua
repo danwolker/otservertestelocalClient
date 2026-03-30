@@ -1087,7 +1087,3 @@ end
 function setSpeakerVolume(value)
   sendToHelper({ type = 'SET_SPEAKER_VOLUME', value = value })
 end
-
-function setInputProfile(profile)
-  sendToHelper({ type = 'SET_INPUT_PROFILE', value = profile })
-end

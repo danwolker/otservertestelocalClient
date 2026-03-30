@@ -92,17 +92,7 @@ OptionPanel
     maximum: 100
     @onValueChange: modules.client_options.setOption('speakerVolume', self:getValue())
 
-  Label
-    id: inputProfileLabel
-    !text: tr('Input Profile:')
-    margin-top: 10
 
-  ComboBox
-    id: inputProfile
-    margin-top: 3
-    margin-right: 2
-    margin-left: 2
-    @onOptionChange: modules.client_options.setOption('inputProfile', self:getCurrentOption().data)
 
   Panel
     id: testSection
