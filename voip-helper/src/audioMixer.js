@@ -23,9 +23,9 @@ class AudioMixer {
         this.nextTickTimeout = null;
         this.expectedTickTime = 0;
         
-        // Jitter Buffer: Mínimo de frames acumulados antes de começar a mixar um player
-        // 4 frames = ~80ms de latência extra, ideal para internet brasileira estável
-        this.jitterFrames = options.jitterFrames || 4; 
+        // 6 frames = ~120ms de latência extra, ideal para resilência em VPNs e conexões variáveis.
+        // O valor pode ser menor (ex: 3) em servidores AWS diretos.
+        this.jitterFrames = options.jitterFrames || 6; 
         this.playerStarted = new Map(); // playerId -> boolean
 
         // Buffer de mixagem intermediário pré-alocado usando Int32 para evitar overflow durante a soma
@@ -117,7 +117,7 @@ class AudioMixer {
         // Controle de Jitter Buffer (Catch-up inteligente)
         // Se a fila passar de 5 frames (~100ms), descartamos o frame MAIS ANTIGO para manter o tempo real.
         // É melhor perder 20ms de áudio do que ficar com lag acumulado para sempre.
-        const MAX_QUEUE = Math.max(8, this.jitterFrames * 2);
+        const MAX_QUEUE = Math.max(15, this.jitterFrames * 2.5);
         if (queue.length > MAX_QUEUE) {
             queue.shift(); // Descarta o frame que já passou
         }
@@ -168,11 +168,21 @@ class AudioMixer {
 
         // 1. Identificar jogadores ativos
         for (const [playerId, queue] of this.playerQueues.entries()) {
+            // Cleanup: Remover jogadores inativos por mais de 5 segundos
             if (now - this.lastActivity.get(playerId) > 5000) {
                 this.playerQueues.delete(playerId);
                 this.lastActivity.delete(playerId);
                 this.playerStarted.delete(playerId);
                 continue;
+            }
+
+            const isStarted = this.playerStarted.get(playerId);
+            
+            if (isStarted && queue.length === 0) {
+                // RE-BUFFERING: Se o áudio chegar ao fim de repente (Jitter de rede)
+                // Paramos de tocar e forçamos o mixer a acumular jitterFrames novamente
+                this.playerStarted.set(playerId, false);
+                // console.log(`>> [VoIP Mixer] Re-buffering detectado para Player ${playerId}`);
             }
 
             if (this.playerStarted.get(playerId) && queue.length > 0) {
