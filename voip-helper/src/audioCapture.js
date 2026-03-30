@@ -1,6 +1,21 @@
 const { spawn, execSync, exec } = require('child_process');
 const path = require('path');
-const { Rnnoise } = require('@shiguredo/rnnoise-wasm');
+// Importação de RNNoise movida para carregamento dinâmico (Node.js v22/v24 compatibility)
+let Rnnoise = null;
+
+/**
+ * Inicializa o RNNoise dinamicamente (Compatibilidade Node.js v24)
+ */
+async function initDenoise() {
+    if (Rnnoise) return;
+    try {
+        const mod = await import('@shiguredo/rnnoise-wasm');
+        Rnnoise = mod.Rnnoise;
+        console.log('>> [VoIP Helper] Filtro RNNoise carregado com sucesso.');
+    } catch (e) {
+        console.error('>> [VoIP Helper] Erro ao carregar RNNoise dinamicamente:', e.message);
+    }
+}
 
 // ────────────────────────────────────────
 // Configurações de Áudio
@@ -163,12 +178,17 @@ function sendPcmChunk(chunk, ws, opus, wsOpen) {
 async function initDenoise() {
     if (_state.rnnoise) return;
     try {
-        console.log('>> [VoIP Helper] Carregando módulo RNNoise (Machine Learning)...');
+        if (!Rnnoise) {
+            console.log('>> [VoIP Helper] Tentando carregar filtros de áudio (RNNoise-WASM)...');
+            const mod = await import('@shiguredo/rnnoise-wasm');
+            Rnnoise = mod.Rnnoise;
+        }
+        console.log('>> [VoIP Helper] Inicializando módulo RNNoise (Machine Learning)...');
         _state.rnnoise = await Rnnoise.load();
         _state.denoiseState = _state.rnnoise.createDenoiseState();
         console.log('>> [VoIP Helper] RNNoise carregado com sucesso.');
     } catch (e) {
-        console.error('>> [VoIP Helper] Erro ao carregar RNNoise:', e);
+        console.error('>> [VoIP Helper] Erro ao carregar RNNoise dinamicamente:', e.message);
     }
 }
 

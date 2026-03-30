@@ -173,7 +173,7 @@ wss.on('connection', (ws) => {
 // 2. Dispatcher de captura
 // ────────────────────────────────────────
 
-function startCapture(ctx) {
+async function startCapture(ctx) {
     const state = _getState();
     if (state.isTalking) return;
 
@@ -182,12 +182,12 @@ function startCapture(ctx) {
     }
 
     if (state.captureMode === 'system') {
-        startSystemAudio(
+        await startSystemAudio(
             (chunk) => sendPcmChunk(chunk, ctx.mainVoipWs, ctx.captureEncoder, WebSocket.OPEN),
             (e) => console.error('>> [VoIP Helper] Erro na captura de sistema:', e)
         );
     } else {
-        startMic(ctx);
+        await startMic(ctx);
     }
 }
 
@@ -204,9 +204,9 @@ function stopCapture(ctx) {
 // ────────────────────────────────────────
 // 3. Captura de Microfone (PowerShell)
 // ────────────────────────────────────────
-function startMic(ctx) {
+async function startMic(ctx) {
     console.log('>> [VoIP Helper] Iniciando captura de Microfone (PowerShell)...');
-    startMicAudio(
+    await startMicAudio(
         (chunk) => {
             // Acessa ctx.mainVoipWs em tempo de execução (não captura o valor antigo no closure)
             if (!ctx.mainVoipWs || ctx.mainVoipWs.readyState !== WebSocket.OPEN) {
@@ -254,7 +254,7 @@ async function sendDeviceListOut(ctx) {
 // ────────────────────────────────────────
 // 4b. Teste de Áudio (Loopback)
 // ────────────────────────────────────────
-function startAudioTest(ctx) {
+async function startAudioTest(ctx) {
     console.log('>> [VoIP Helper] Iniciando Teste de Áudio (Loopback via Mixer)...');
     if (ctx.testAudioInput) stopAudioTest(ctx);
     
@@ -267,7 +267,7 @@ function startAudioTest(ctx) {
     // ID fictício para o teste local para que o mixer o diferencie de outros players
     const TEST_PLAYER_ID = 999999;
 
-    ctx.testAudioInput = startMicAudio(
+    ctx.testAudioInput = await startMicAudio(
         (chunk) => {
             if (ctx.mixer) {
                 ctx.mixer.addAudio(TEST_PLAYER_ID, chunk);
