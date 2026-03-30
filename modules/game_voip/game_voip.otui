@@ -164,8 +164,74 @@ MiniWindow
         @onClick: modules.game_voip.onMuteClick(self)
 
     Panel
+      id: globalVocationPanel
+      anchors.top: vocationPanel.bottom
+      anchors.left: parent.left
+      anchors.right: parent.right
+      height: 22
+      margin-top: 2
+      background-color: #00000055
+      visible: false
+
+      VoipMuteButton
+        id: G-Knight
+        anchors.top: parent.top
+        anchors.left: parent.left
+        width: 34
+        margin-top: 2
+        margin-left: 1
+        !text: tr('G-K')
+        !tooltip: tr('GLOBAL Mute Knights')
+        @onClick: modules.game_voip.onGlobalMuteClick(self)
+
+      VoipMuteButton
+        id: G-Druid
+        anchors.top: parent.top
+        anchors.left: prev.right
+        width: 34
+        margin-top: 2
+        margin-left: 1
+        !text: tr('G-D')
+        !tooltip: tr('GLOBAL Mute Druids')
+        @onClick: modules.game_voip.onGlobalMuteClick(self)
+
+      VoipMuteButton
+        id: G-Sorcerer
+        anchors.top: parent.top
+        anchors.left: prev.right
+        width: 34
+        margin-top: 2
+        margin-left: 1
+        !text: tr('G-S')
+        !tooltip: tr('GLOBAL Mute Sorcerers')
+        @onClick: modules.game_voip.onGlobalMuteClick(self)
+
+      VoipMuteButton
+        id: G-Paladin
+        anchors.top: parent.top
+        anchors.left: prev.right
+        width: 34
+        margin-top: 2
+        margin-left: 1
+        !text: tr('G-P')
+        !tooltip: tr('GLOBAL Mute Paladins')
+        @onClick: modules.game_voip.onGlobalMuteClick(self)
+
+      VoipMuteButton
+        id: G-Monk
+        anchors.top: parent.top
+        anchors.left: prev.right
+        anchors.right: parent.right
+        margin-top: 2
+        margin-left: 1
+        margin-right: 1
+        !text: tr('G-M')
+        !tooltip: tr('GLOBAL Mute Monks')
+        @onClick: modules.game_voip.onGlobalMuteClick(self)
+
+    Panel
       id: controlPanel
-      anchors.top: prev.bottom
+      anchors.top: globalVocationPanel.bottom
       anchors.left: parent.left
       anchors.right: parent.right
       margin-top: 2
@@ -181,11 +247,26 @@ MiniWindow
         margin-left: 1
         margin-right: 1
         !text: tr('MUTE ALL')
-        !tooltip: tr('Mute All')
+        !tooltip: tr('Mute All (Local)')
         background-color: #444477
         @onClick: modules.game_voip.onMuteClick(self)
         $checked:
           background-color: #993333
+
+      VoipMuteButton
+        id: GlobalAll
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.horizontalCenter
+        margin-top: 2
+        margin-left: 1
+        margin-right: 1
+        !text: tr('G-MUTE ALL')
+        !tooltip: tr('GLOBAL Mute All (Leader only)')
+        visible: false
+        @onClick: modules.game_voip.onGlobalMuteClick(self)
+        $checked:
+          background-color: #ccaa00
 
       Button
         id: reportButton
@@ -206,7 +287,7 @@ MiniWindow
         @onClick: modules.game_voip.sendReport()
 
     HorizontalSeparator
-      anchors.top: prev.bottom
+      anchors.top: controlPanel.bottom
       anchors.left: parent.left
       anchors.right: parent.right
       margin-top: 2
