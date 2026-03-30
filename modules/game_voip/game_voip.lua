@@ -17,6 +17,7 @@ local VOCATION_INFO = {
   [7] = { name = "Royal Paladin", color = "#FFD700", icon = "P" },
   [8] = { name = "Elite Knight", color = "#C0C0C0", icon = "K" },
   [9] = { name = "Monk", color = "#C0C0C0", icon = "M" },
+  [10] = { name = "Exalted Monk", color = "#C0C0C0", icon = "M" },
 }
 
 -- Maps vocation id ranges to mute button ids
@@ -26,7 +27,7 @@ local VOCATION_MUTE_ID = {
   [2] = "Druid",    [6] = "Druid",
   [3] = "Paladin",  [7] = "Paladin",
   [4] = "Knight",   [8] = "Knight",
-  [9] = "Monk",
+  [9] = "Monk",     [10] = "Exalted Monk",
 }
 
 -- member data stored by name, populated from server opcode
