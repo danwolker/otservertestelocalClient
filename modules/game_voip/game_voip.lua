@@ -163,14 +163,31 @@ function connectToHelper()
 
       elseif data.type == 'vocation_mute_changed' then
         local vocId = tonumber(data.vocId)
+        local vocMuteId = VOCATION_MUTE_ID[vocId] or ""
         if data.isGlobal then
           mutedGlobalVocations[vocId] = data.muted
+          local btn = voipWindow:recursiveGetChildById('G-' .. vocMuteId)
+          if btn then btn:setChecked(data.muted) end
+        else
+          mutedVocations[vocMuteId] = data.muted
+          local btn = voipWindow:recursiveGetChildById(vocMuteId)
+          if btn then btn:setChecked(data.muted) end
+          
+          -- Sincronizar o botão "MUTE ALL" local
+          local vocationPanel = voipWindow:recursiveGetChildById('vocationPanel')
+          local allChecked = true
+          if vocationPanel then 
+            for _, child in ipairs(vocationPanel:getChildren()) do 
+              if not child:isChecked() then allChecked = false break end 
+            end 
+          end
+          local allBtn = voipWindow:recursiveGetChildById('All')
+          if allBtn then allBtn:setChecked(allChecked) end
+          mutedVocations["All"] = allChecked
         end
         for name, d in pairs(partyData) do
           if d.vocID == vocId then refreshMemberUI(name) end
         end
-        local btn = voipWindow:recursiveGetChildById('G-' .. (VOCATION_MUTE_ID[vocId] or ""))
-        if btn then btn:setChecked(data.muted) end
 
       elseif data.type == 'mute_member_ack' then
         print('[VoIP] Mute local confirmado pelo servidor: ID ' .. tostring(data.targetPlayerId) .. ' -> ' .. tostring(data.muted))
@@ -529,8 +546,7 @@ end
 
 function onMuteClick(widget)
   local id = widget:getId()
-  local checked = not widget:isChecked()
-  widget:setChecked(checked)
+  local checked = widget:isChecked() -- Já foi alterado pelo motor do OTClient por ser um UICheckBox
   local vocationPanel = voipWindow:recursiveGetChildById('vocationPanel')
   if id == "All" then
     if vocationPanel then 
@@ -561,8 +577,7 @@ end
 function onGlobalMuteClick(widget)
   if not isLocalLeader() then return end
   local id = widget:getId()
-  local checked = not widget:isChecked()
-  widget:setChecked(checked)
+  local checked = widget:isChecked() -- Já foi alterado pelo motor
   if id == "GlobalAll" then sendToHelper({ type = 'GLOBAL_MUTE', muted = checked })
   else
     local vocName = id:sub(3)
@@ -600,8 +615,8 @@ function onMemberClick(widget, mousePos, mouseButton)
     menu:addOption('Seguir', function() local c = getCreatureByName(name) if c then g_game.follow(c) end end)
     menu:addOption('Mandar mensagem', function() g_game.openPrivateChannel(name) end)
     if not data.isLeader then
-      local isMuted = mutedPlayers[name]
-      menu:addOption(isMuted and 'Desfazer ignorar' or 'Ignorar jogador', function() togglePlayerMute(name, false) end)
+      local isLocallyMuted = (mutedPlayers[name] == true)
+      menu:addOption(isLocallyMuted and 'Parar de ignorar' or 'Ignorar jogador', function() togglePlayerMute(name, false) end)
     end
     if isLocalLeader() and not data.isLeader then
       local isGloballyMuted = (mutedGlobals[data.id] == true)
