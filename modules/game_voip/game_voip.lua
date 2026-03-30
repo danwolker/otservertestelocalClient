@@ -230,15 +230,7 @@ end
 local function simpleJson(t)
   local res = {}
   for k,v in pairs(t) do
-    local valStr = ""
-    if type(v) == "boolean" then
-      valStr = tostring(v)
-    elseif type(v) == "number" then
-      valStr = tostring(v)
-    else
-      valStr = string.format('"%s"', tostring(v))
-    end
-    table.insert(res, string.format('"%s":%s', tostring(k), valStr))
+    table.insert(res, string.format('"%s":"%s"', tostring(k), tostring(v)))
   end
   return "{" .. table.concat(res, ",") .. "}"
 end
