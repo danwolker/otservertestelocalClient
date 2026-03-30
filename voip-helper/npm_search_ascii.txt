@@ -1,0 +1,130 @@
+@shiguredo/rnnoise-wasm
+WebAssembly build of RNNoise
+Version 2025.1.5 published 2025-05-09 by voluntas
+Maintainers: voluntas takeruohta
+Keywords: rnnoise noise-suppression
+https://npm.im/@shiguredo/rnnoise-wasm
+
+rnnoise
+Node.js bindings to Xiph's RNNoise denoising C library
+Version 0.1.8 published 2020-02-12 by cedrickchee
+Maintainers: cedrickchee
+Keywords: audio noise-suppression rnnoise pcm api deeplearning rnn
+https://npm.im/rnnoise
+
+@jitsi/rnnoise-wasm
+Rnnoise sub-module compiled with emscripten as web assembly module
+Version 0.2.1 published 2025-02-03 by saghul
+Maintainers: hristoterezov yanas jitsiorg saghul mihhu jallamsetty andrei.gavrilescu damencho calinteodor
+https://npm.im/@jitsi/rnnoise-wasm
+
+@echogarden/rnnoise-wasm
+RNNoise noise suppression library, compiled to WASM. Intended for use with Echogarden.
+Version 0.2.0 published 2024-10-26 by rotemdan
+Maintainers: rotemdan
+https://npm.im/@echogarden/rnnoise-wasm
+
+@timephy/rnnoise-wasm
+This library implements the RNNoise noise suppression library as a WASM module for use in web frontends.
+Version 1.0.0 published 2024-08-07 by timephy
+Maintainers: timephy
+https://npm.im/@timephy/rnnoise-wasm
+
+livekit-rnnoise-processor
+A WebAssembly module implementing the RNNoise noise suppression library for livekit typescript.
+Version 2.0.0 published 2026-03-08 by dadadah
+Maintainers: dadadah
+https://npm.im/livekit-rnnoise-processor
+
+simple-rnnoise-wasm
+Tiny Web Audio RNNoise wrapper compiled to WebAssembly with an AudioWorklet node.
+Version 1.1.0 published 2025-08-17 by jsmith01
+Maintainers: jsmith01
+Keywords: rnnoise webaudio audio wasm vad denoise
+https://npm.im/simple-rnnoise-wasm
+
+@cc-livekit/audio-pipeline-plugin
+A WebAssembly audio pipeline module for RNNoise and DeepFilterNet on web frontends.
+Version 1.1.7 published 2026-03-12 by luke.ewan
+Maintainers: showonne luke.ewan
+https://npm.im/@cc-livekit/audio-pipeline-plugin
+
+com.adrenak.rnnoise4unity
+RNNoise for Unity
+Version 1.0.0 published 2025-02-22 by adrenak
+Maintainers: adrenak
+Keywords: Audio Noise Denoising RNNoise voip voice speech
+https://npm.im/com.adrenak.rnnoise4unity
+
+@cc-livekit/denoise-plugin
+A WebAssembly module implementing the RNNoise noise suppression library for web frontends.
+Version 1.0.10 published 2026-02-11 by luke.ewan
+Maintainers: showonne luke.ewan
+https://npm.im/@cc-livekit/denoise-plugin
+
+@bigbinary/rnnoise-wasm
+Rnnoise sub-module compiled with emscripten as web assembly module
+Version 0.1.0 published 2024-09-02 by neetohq
+Maintainers: neetohq bigbinarybot neerajdotname
+https://npm.im/@bigbinary/rnnoise-wasm
+
+rnnoise-win
+[FORK] Node.js bindings to Xiph's RNNoise denoising C library
+Version 1.0.2 published 2024-06-08 by adam.pzz
+Maintainers: adam.pzz
+Keywords: audio noise-suppression rnnoise pcm api deeplearning rnn
+https://npm.im/rnnoise-win
+
+purify-voice
+Professional audio denoising for JavaScript using RNNoise - works with React, Vue, Angular, and vanilla JS
+Version 1.0.9 published 2025-12-16 by sagar32
+Maintainers: sagar32
+Keywords: audio denoising noise-reduction noise-suppression rnnoise audio-processing webassembly wasm react vue angular speech voice real-time
+https://npm.im/purify-voice
+
+@100mslive/hms-rnnoise-wasm
+Rnnoise sub-module compiled with emscripten as web assembly module
+Version 0.0.1 published 2021-10-13 by ashish17
+Maintainers: yogeshfromhms aniketb aniket100ms eswar-clynn vishal09 vivek9patel ravitheja83 saptanpm saikatmitra-100ms
+https://npm.im/@100mslive/hms-rnnoise-wasm
+
+@squarefong/rnnoise-wasm
+WebAssembly build of RNNoise
+Version 2025.2.0-canary.1 published 2026-01-23 by squarefong
+Maintainers: squarefong
+Keywords: rnnoise noise-suppression
+https://npm.im/@squarefong/rnnoise-wasm
+
+@kang16hou/rnnoise-wasm
+WebAssembly build of RNNoise
+Version 1.0.1 published 2025-10-16 by kang16hou
+Maintainers: kang16hou
+Keywords: rnnoise noise-suppression webassembly audio-processing
+https://npm.im/@kang16hou/rnnoise-wasm
+
+@danelowe/std-rnnn
+std.rnnn Recurrent Neural Network model for noise reduction in ffmpeg. From Xiph rnnoise.
+Version 1.0.6 published 2023-10-25 by danelowe
+Maintainers: danelowe
+https://npm.im/@danelowe/std-rnnn
+
+@zhongjiayuanhang/rnnoise-wasm
+WebAssembly build of RNNoise
+Version 1.0.2 published 2025-10-28 by zhongjiayuanhang
+Maintainers: zhongjiayuanhang
+Keywords: rnnoise noise-suppression webassembly audio-processing
+https://npm.im/@zhongjiayuanhang/rnnoise-wasm
+
+@sapphi-red/web-noise-suppressor
+Noise suppressor nodes for Web Audio API.
+Version 0.3.5 published 2024-05-19 by sapphi-red
+Maintainers: sapphi-red
+https://npm.im/@sapphi-red/web-noise-suppressor
+
+echogarden
+An easy-to-use speech toolset. Includes tools for synthesis, recognition, alignment, speech translation, language detection, source separation and more.
+Version 2.10.1 published 2025-09-01 by rotemdan
+Maintainers: rotemdan
+Keywords: speech text-to-speech speech-synthesis speech-to-text speech-recognition speech-alignment forced-alignment speech-translation language-identification language-detection source-separation
+https://npm.im/echogarden
+

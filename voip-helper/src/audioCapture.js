@@ -172,45 +172,53 @@ async function initDenoise() {
     }
 }
 
+// Buffers e Arrays estáticos para Zero-GC e performance máxima:
+const FLOAT_FRAME = new Float32Array(480);
+const OUT_FRAME = Buffer.allocUnsafe(960);
+
 /**
  * Processa um chunk de áudio através do supressor de ruído RNNoise.
  * Requer frames de exatamente 480 samples (@48kHz).
  */
 function processDenoise(inputBuffer) {
-    if (!_state.denoiseEnabled || !_state.denoiseState) return inputBuffer;
+    if (_state.inputProfile !== 'isolation' || !_state.denoiseEnabled || !_state.denoiseState) {
+        return inputBuffer;
+    }
 
     // Acumula no buffer de denoise
     _state.denoiseBuffer = Buffer.concat([_state.denoiseBuffer, inputBuffer]);
 
     const SAMPLE_COUNT = 480;
-    const BYTE_COUNT = SAMPLE_COUNT * 2; // Int16
+    const BYTE_COUNT = 960; // 480 samples * 2 bytes
     const processedFrames = [];
 
     while (_state.denoiseBuffer.length >= BYTE_COUNT) {
+        // Pega um único frame de 960 bytes
         const rawFrame = _state.denoiseBuffer.slice(0, BYTE_COUNT);
         _state.denoiseBuffer = _state.denoiseBuffer.slice(BYTE_COUNT);
 
-        const floatFrame = new Float32Array(SAMPLE_COUNT);
+        // Preenche o buffer Float32 pré-alocado
         for (let i = 0; i < SAMPLE_COUNT; i++) {
-            floatFrame[i] = rawFrame.readInt16LE(i * 2) / 32768.0;
+            FLOAT_FRAME[i] = rawFrame.readInt16LE(i * 2) / 32768.0;
         }
 
-        // RNNoise processa o Float32Array in-place
-        _state.denoiseState.processFrame(floatFrame);
+        // RNNoise processa in-place
+        _state.denoiseState.processFrame(FLOAT_FRAME);
 
-        const outFrame = Buffer.allocUnsafe(BYTE_COUNT);
+        // Grava de volta no Buffer pré-alocado
         for (let i = 0; i < SAMPLE_COUNT; i++) {
-            let s = Math.round(floatFrame[i] * 32768.0);
+            let s = Math.round(FLOAT_FRAME[i] * 32768.0);
             if (s > 32767) s = 32767;
             if (s < -32768) s = -32768;
-            outFrame.writeInt16LE(s, i * 2);
+            OUT_FRAME.writeInt16LE(s, i * 2);
         }
-        processedFrames.push(outFrame);
+
+        // Fazemos uma cópia leve pro array de saída para podermos reutilizar o OUT_FRAME no próximo loop imediatamente
+        processedFrames.push(Buffer.from(OUT_FRAME));
     }
 
     return processedFrames.length > 0 ? Buffer.concat(processedFrames) : Buffer.alloc(0);
 }
-
 // ────────────────────────────────────────
 // startMicAudio
 // ────────────────────────────────────────
@@ -266,27 +274,40 @@ async function startMicAudio(onChunk, onError, bypassGate = false) {
 
                 // Debug log to confirm data is coming in (max once per second to avoid spam)
                 if (!_state.lastLogTime || Date.now() - _state.lastLogTime > 1000) {
-                    const status = _state.denoiseEnabled ? 'AI Denoise ON' : 'Denoise OFF';
+                    const status = (_state.inputProfile === 'isolation' && _state.denoiseEnabled) ? 'AI Denoise ON' : 'Denoise OFF (Studio)';
                     console.log(`>> [VoIP Helper] Audio chunk processed [${status}]: ${data.length} bytes (Level: ${_state.voiceLevel}, Gate: ${_state.sensitivity})`);
                     _state.lastLogTime = Date.now();
-                    // Debug log fundamental para rastreio
-                    if (Date.now() % 500 < 50) { // Log a cada ~500ms
-                        console.log(`>> [VoIP Debug] Vol: ${_state.voiceLevel}% | Gate: ${_state.sensitivity}%`);
-                    }
+                }
 
-                    // 2. Lógica de Perfil (Isolamento vs Estúdio)
-                    let currentSensitivity = _state.sensitivity;
-                    if (_state.inputProfile === 'isolation') {
-                        // Perfil de isolamento torna o noise gate mais "técnico" / agressivo
-                        currentSensitivity = Math.max(currentSensitivity, 15);
-                    }
+                // Log mais rápido p/ debug opcional
+                if (Date.now() % 500 < 50 && !_state.lastDebugLogTime) {
+                    _state.lastDebugLogTime = Date.now();
+                    // console.log(`>> [VoIP Debug] Vol: ${_state.voiceLevel}% | Gate: ${_state.sensitivity}%`);
+                } else if (Date.now() % 500 >= 50) {
+                    _state.lastDebugLogTime = null;
+                }
 
-                    // Noise Gate: only pass data if it's above sensitivity (or bypass requested)
-                    if (bypassGate || _state.voiceLevel >= currentSensitivity) {
-                        if (this.onData) this.onData(data);
-                    }
-                });
+                // 2. Lógica de Perfil (Isolamento vs Estúdio)
+                let currentSensitivity = _state.sensitivity;
+                if (_state.inputProfile === 'isolation') {
+                    // Perfil de isolamento toma conta do noise gate agressivo pra tirar barulho de teclado remanescente
+                    currentSensitivity = Math.max(currentSensitivity, 15);
+                }
 
+                let passGate = false;
+                if (bypassGate || _state.voiceLevel >= currentSensitivity) {
+                    passGate = true;
+                    _state.gateHoldUntil = Date.now() + 500; // Hold time de 500ms
+                } else if (_state.gateHoldUntil && Date.now() < _state.gateHoldUntil) {
+                    // Permanece aberto pelo Hold Time para que a voz não corte de repente ao descer a respiração
+                    passGate = true;
+                }
+
+                // Noise Gate: only pass data if it's above sensitivity
+                if (passGate) {
+                    if (this.onData) this.onData(data);
+                }
+            });
             this.process.stderr.on('data', (data) => {
                 const msg = data.toString();
                 console.error(`>> [VoIP Helper] Mic PS Stderr: ${msg}`);
