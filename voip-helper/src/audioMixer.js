@@ -168,23 +168,24 @@ class AudioMixer {
 
         // 1. Identificar jogadores ativos
         for (const [playerId, queue] of this.playerQueues.entries()) {
+            const lastActive = this.lastActivity.get(playerId) || 0;
+            
             // Cleanup: Remover jogadores inativos por mais de 5 segundos
-            if (now - this.lastActivity.get(playerId) > 5000) {
+            if (now - lastActive > 5000) {
                 this.playerQueues.delete(playerId);
                 this.lastActivity.delete(playerId);
                 this.playerStarted.delete(playerId);
                 continue;
             }
 
-            const isStarted = this.playerStarted.get(playerId);
+            const isStarted = this.playerStarted.get(playerId) || false;
             
+            // RE-BUFFERING: Se o áudio acabar de repente, pausamos e esperamos o colchão encher
             if (isStarted && queue.length === 0) {
-                // RE-BUFFERING: Se o áudio chegar ao fim de repente (Jitter de rede)
-                // Paramos de tocar e forçamos o mixer a acumular jitterFrames novamente
                 this.playerStarted.set(playerId, false);
-                // console.log(`>> [VoIP Mixer] Re-buffering detectado para Player ${playerId}`);
             }
 
+            // Se o jogador acumulou frames suficientes ou já estava tocando
             if (this.playerStarted.get(playerId) && queue.length > 0) {
                 activePlayers.push(playerId);
             }
